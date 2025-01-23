@@ -225,7 +225,7 @@ const PortfolioPage: React.FC = () => {
                   <Card 
                     sx={{ 
                       width: '100%',
-                      height: { xs: '400px', sm: '360px' },
+                      height: expandedNews.includes(stock.ticker) ? 'auto' : { xs: '440px', sm: '400px' },
                       display: 'flex',
                       flexDirection: 'column',
                       position: 'relative',
@@ -241,7 +241,7 @@ const PortfolioPage: React.FC = () => {
                         display: 'flex',
                         flexDirection: 'column',
                         p: { xs: 2, sm: 3 },
-                        '&:last-child': { pb: '16px' }
+                        '&:last-child': { pb: 3 }
                       }}
                     >
                       <Box sx={{ mb: 2 }}>
@@ -302,42 +302,45 @@ const PortfolioPage: React.FC = () => {
                         >
                           News
                         </Button>
-                        <Box sx={{ 
-                          width: '100%',
-                          maxWidth: '500px',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          alignItems: 'center',
-                          overflow: 'auto',
-                          maxHeight: expandedNews.includes(stock.ticker) ? '120px' : '0px',
-                          opacity: expandedNews.includes(stock.ticker) ? 1 : 0,
-                          visibility: expandedNews.includes(stock.ticker) ? 'visible' : 'hidden',
-                          transition: 'all 0.3s ease-in-out'
-                        }}>
-                          {stock.news && stock.news.map((item, index) => (
-                            <Box key={index} sx={{ 
-                              p: 1.5,
-                              width: '100%',
-                              borderBottom: index < stock.news!.length - 1 ? `1px solid ${theme.palette.divider}` : 'none',
-                              textAlign: 'left'
-                            }}>
-                              <Typography variant="body2" component="a" href={item.link} target="_blank" rel="noopener noreferrer"
-                                sx={{ 
-                                  color: 'text.primary',
-                                  textDecoration: 'none',
-                                  '&:hover': { textDecoration: 'underline' },
-                                  display: 'block',
-                                  mb: 0.5
-                                }}
-                              >
-                                {item.title}
-                              </Typography>
-                              <Typography variant="caption" color="text.secondary" display="block">
-                                {new Date(item.pubDate).toLocaleDateString()}
-                              </Typography>
-                            </Box>
-                          ))}
-                        </Box>
+                        {expandedNews.includes(stock.ticker) && (
+                          <Box sx={{ 
+                            width: '100%',
+                            maxWidth: '500px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            backgroundColor: theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.02)',
+                            borderRadius: 1,
+                            border: `1px solid ${theme.palette.divider}`,
+                            mt: 1
+                          }}>
+                            {stock.news && stock.news.map((item, index) => (
+                              <Box key={index} sx={{ 
+                                p: 1.5,
+                                width: '100%',
+                                borderBottom: index < stock.news!.length - 1 ? `1px solid ${theme.palette.divider}` : 'none',
+                                '&:hover': {
+                                  backgroundColor: theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)'
+                                }
+                              }}>
+                                <Typography variant="body2" component="a" href={item.link} target="_blank" rel="noopener noreferrer"
+                                  sx={{ 
+                                    color: 'text.primary',
+                                    textDecoration: 'none',
+                                    '&:hover': { textDecoration: 'underline' },
+                                    display: 'block',
+                                    mb: 0.5
+                                  }}
+                                >
+                                  {item.title}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary" display="block">
+                                  {new Date(item.pubDate).toLocaleDateString()}
+                                </Typography>
+                              </Box>
+                            ))}
+                          </Box>
+                        )}
                       </Box>
 
                       <Box sx={{ 
