@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
+const translate = require('translate-google');
 const app = express();
 
 // Middleware
@@ -150,9 +151,6 @@ app.get('/api/stock/:ticker', async (req, res) => {
 
         const $ = require('cheerio').load(response.data);
         
-        // Debug: Log the HTML structure around price elements
-        console.log('HTML structure:', $('.YMlKec.fxKbKc').parent().html());
-        
         // Find the main price element
         const priceText = $('.YMlKec.fxKbKc').first().text().trim();
         if (!priceText) continue;
@@ -166,22 +164,17 @@ app.get('/api/stock/:ticker', async (req, res) => {
         // Try different selectors for price changes
         const priceChangeElement = $('.P2Luy').first();
         const changeText = priceChangeElement.text().trim();
-        console.log('Price change element found:', changeText);
 
         let change = 0;
         let changePercent = 0;
         let direction = 'up';
 
         if (changeText) {
-            // Example format: "+25.19 (+1.23%)" or "-25.19 (-1.23%)"
             const matches = changeText.match(/([-+]?\d+\.?\d*)\s*\(([-+]?\d+\.?\d*)%\)/);
-            console.log('Regex matches:', matches);
-            
             if (matches) {
                 change = parseFloat(matches[1]);
                 changePercent = parseFloat(matches[2]);
                 direction = change < 0 ? 'down' : 'up';
-                console.log('Parsed values:', { change, changePercent, direction });
             }
         }
 
@@ -267,6 +260,82 @@ app.get('/api/sec/:ticker', async (req, res) => {
   } catch (error) {
     console.error('Error analyzing SEC filings:', error);
     res.status(500).json({ error: 'Failed to analyze SEC filings' });
+  }
+});
+
+// Helper function to retry failed operations
+const retryOperation = async (operation, maxRetries = 3, delay = 1000) => {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (i === maxRetries - 1) throw error;
+      await new Promise(resolve => setTimeout(resolve, delay * (i + 1)));
+    }
+  }
+};
+
+// Translation endpoint
+app.post('/api/translate', async (req, res) => {
+  try {
+    const { text, targetLanguage = 'iw' } = req.body;
+    
+    if (!text) {
+      return res.status(400).json({ 
+        error: 'Text is required',
+        code: 'MISSING_TEXT'
+      });
+    }
+
+    if (text.length > 5000) {
+      return res.status(400).json({ 
+        error: 'Text is too long. Maximum length is 5000 characters.',
+        code: 'TEXT_TOO_LONG'
+      });
+    }
+
+    const translation = await retryOperation(async () => {
+      try {
+        const result = await translate(text, { to: 'iw' });
+        if (!result) throw new Error('Empty translation result');
+        return result;
+      } catch (error) {
+        console.error('Translation attempt failed:', error);
+        throw error;
+      }
+    });
+    
+    res.json({
+      originalText: text,
+      translatedText: translation,
+      targetLanguage: 'iw'
+    });
+  } catch (error) {
+    console.error('Translation error:', error);
+    
+    let statusCode = 500;
+    let errorMessage = 'Translation failed';
+    let errorCode = 'TRANSLATION_FAILED';
+
+    if (error.message.includes('network')) {
+      statusCode = 503;
+      errorMessage = 'Translation service is temporarily unavailable';
+      errorCode = 'NETWORK_ERROR';
+    } else if (error.message.includes('rate')) {
+      statusCode = 429;
+      errorMessage = 'Too many translation requests. Please try again later';
+      errorCode = 'RATE_LIMIT';
+    } else if (error.message.includes('not supported')) {
+      statusCode = 400;
+      errorMessage = 'Translation to this language is not supported';
+      errorCode = 'UNSUPPORTED_LANGUAGE';
+    }
+
+    res.status(statusCode).json({ 
+      error: errorMessage,
+      code: errorCode,
+      message: error.message 
+    });
   }
 });
 
