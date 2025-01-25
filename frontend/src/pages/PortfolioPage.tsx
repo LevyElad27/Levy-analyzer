@@ -8,12 +8,16 @@ import {
   Grid,
   Card,
   CardContent,
-  IconButton,
   useTheme,
   useMediaQuery,
   Chip,
   Divider,
-  Paper
+  Paper,
+  CardActions,
+  List,
+  ListItem,
+  ListItemText,
+  IconButton
 } from '@mui/material';
 import {
   Delete as DeleteIcon,
@@ -22,32 +26,46 @@ import {
   Add as AddIcon,
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon,
-  Newspaper as NewsIcon
+  Newspaper as NewsIcon,
+  Article as ArticleIcon,
+  Translate as TranslateIcon
 } from '@mui/icons-material';
+import { usePortfolio } from '../hooks/usePortfolio';
+import { Link } from '@mui/material';
+import { Collapse } from '@mui/material';
 
 interface NewsItem {
   title: string;
   link: string;
+  source: string;
   pubDate: string;
+  description: string;
 }
 
 interface Stock {
   ticker: string;
-  price?: number;
-  change?: number;
-  changePercent?: string;
-  marketCap?: string;
-  volume?: string;
-  peRatio?: string;
+  name: string;
+  price: number;
+  change: number;
+  changePercent: number;
+  direction: 'up' | 'down';
+  marketCap: string;
+  volume: string;
+  peRatio: string;
+  lastUpdate: string;
   news?: NewsItem[];
-  lastUpdate?: string;
 }
 
 const PortfolioPage: React.FC = () => {
-  const [stocks, setStocks] = useState<Stock[]>([]);
+  const {
+    stocks,
+    loading,
+    error,
+    addStock,
+    removeStock
+  } = usePortfolio();
+
   const [newTicker, setNewTicker] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [expandedNews, setExpandedNews] = useState<string[]>([]);
   
   const theme = useTheme();
@@ -64,36 +82,8 @@ const PortfolioPage: React.FC = () => {
   const handleAddStock = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTicker) return;
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      const newStock: Stock = { 
-        ticker: newTicker.toUpperCase(),
-        price: 150.25,
-        change: 2.5,
-        changePercent: '1.67',
-        marketCap: '2.5T',
-        volume: '52.3M',
-        peRatio: '25.6',
-        news: [
-          { title: 'Sample News 1', link: '#', pubDate: '2024-02-20' },
-          { title: 'Sample News 2', link: '#', pubDate: '2024-02-19' },
-        ],
-        lastUpdate: new Date().toLocaleTimeString()
-      };
-      setStocks(prev => [...prev, newStock]);
-      setNewTicker('');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleRemoveStock = (ticker: string) => {
-    setStocks(prev => prev.filter(stock => stock.ticker !== ticker));
+    await addStock(newTicker);
+    setNewTicker('');
   };
 
   return (
@@ -212,7 +202,7 @@ const PortfolioPage: React.FC = () => {
                 margin: 0 
               }}
             >
-              {stocks.map((stock) => (
+              {(stocks as Stock[]).map((stock: Stock) => (
                 <Grid 
                   item 
                   xs={12} 
@@ -225,143 +215,183 @@ const PortfolioPage: React.FC = () => {
                   <Card 
                     sx={{ 
                       width: '100%',
-                      height: expandedNews.includes(stock.ticker) ? 'auto' : { xs: '440px', sm: '400px' },
-                      display: 'flex',
-                      flexDirection: 'column',
+                      background: theme.palette.mode === 'dark' 
+                        ? 'linear-gradient(180deg, rgba(30,33,42,1) 0%, rgba(22,25,32,1) 100%)'
+                        : 'linear-gradient(180deg, rgba(245,245,245,1) 0%, rgba(238,238,238,1) 100%)',
+                      borderRadius: '12px',
+                      overflow: 'hidden',
                       position: 'relative',
-                      transition: 'all 0.3s ease-in-out',
                       '&:hover': {
-                        transform: 'translateY(-4px)'
+                        boxShadow: theme.shadows[8]
                       }
                     }}
                   >
-                    <CardContent 
-                      sx={{ 
-                        height: '100%',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        p: { xs: 2, sm: 3 },
-                        '&:last-child': { pb: 3 }
-                      }}
-                    >
-                      <Box sx={{ mb: 2 }}>
-                        <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                    <CardContent sx={{ p: 2.5 }}>
+                      <Box sx={{ mb: 0.5 }}>
+                        <Typography 
+                          variant="subtitle2" 
+                          color="text.secondary"
+                          sx={{ mb: 0.5, fontSize: '0.875rem' }}
+                        >
+                          {stock.name}
+                        </Typography>
+                        <Typography 
+                          variant="h5" 
+                          component="div" 
+                          sx={{ 
+                            fontWeight: 600,
+                            letterSpacing: '0.5px',
+                            mb: 2
+                          }}
+                        >
                           {stock.ticker}
                         </Typography>
-                        {stock.price && (
-                          <Typography variant="h5" sx={{ fontWeight: 700, my: 1 }}>
-                            ${stock.price.toFixed(2)}
-                          </Typography>
-                        )}
-                        {stock.change && stock.changePercent && (
-                          <Chip
-                            icon={stock.change >= 0 ? <TrendingUpIcon /> : <TrendingDownIcon />}
-                            label={`${stock.change >= 0 ? '+' : ''}${stock.change.toFixed(2)} (${stock.changePercent}%)`}
-                            color={stock.change >= 0 ? 'success' : 'error'}
-                            size="small"
-                            sx={{ mt: 1 }}
-                          />
-                        )}
                       </Box>
 
-                      <Grid container spacing={2} sx={{ mb: 2 }}>
-                        {stock.marketCap && (
-                          <Grid item xs={4}>
-                            <Typography variant="caption" color="text.secondary">Market Cap</Typography>
-                            <Typography variant="body2">{stock.marketCap}</Typography>
-                          </Grid>
-                        )}
-                        {stock.volume && (
-                          <Grid item xs={4}>
-                            <Typography variant="caption" color="text.secondary">Volume</Typography>
-                            <Typography variant="body2">{stock.volume}</Typography>
-                          </Grid>
-                        )}
-                        {stock.peRatio && (
-                          <Grid item xs={4}>
-                            <Typography variant="caption" color="text.secondary">P/E Ratio</Typography>
-                            <Typography variant="body2">{stock.peRatio}</Typography>
-                          </Grid>
-                        )}
-                      </Grid>
-
-                      <Divider />
-
-                      <Box sx={{ 
-                        py: 2,
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        flexGrow: 1
-                      }}>
-                        <Button
-                          startIcon={<NewsIcon />}
-                          endIcon={expandedNews.includes(stock.ticker) ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-                          onClick={() => handleToggleNews(stock.ticker)}
-                          sx={{ width: '200px', mb: 1 }}
+                      <Box sx={{ display: 'flex', alignItems: 'baseline', mb: 1 }}>
+                        <Typography 
+                          variant="h4" 
+                          component="div"
+                          sx={{ 
+                            fontWeight: 700,
+                            mr: 2
+                          }}
                         >
-                          News
-                        </Button>
-                        {expandedNews.includes(stock.ticker) && (
-                          <Box sx={{ 
-                            width: '100%',
-                            maxWidth: '500px',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            alignItems: 'center',
-                            backgroundColor: theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.02)',
-                            borderRadius: 1,
-                            border: `1px solid ${theme.palette.divider}`,
-                            mt: 1
-                          }}>
-                            {stock.news && stock.news.map((item, index) => (
-                              <Box key={index} sx={{ 
-                                p: 1.5,
-                                width: '100%',
-                                borderBottom: index < stock.news!.length - 1 ? `1px solid ${theme.palette.divider}` : 'none',
-                                '&:hover': {
-                                  backgroundColor: theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)'
-                                }
-                              }}>
-                                <Typography variant="body2" component="a" href={item.link} target="_blank" rel="noopener noreferrer"
+                          ${stock.price.toFixed(2)}
+                        </Typography>
+                        <Chip
+                          label={`${stock.change >= 0 ? '+' : ''}${stock.change.toFixed(2)} (${stock.changePercent.toFixed(2)}%)`}
+                          color={stock.direction === 'up' ? 'success' : 'error'}
+                          size="small"
+                          sx={{ 
+                            height: '24px',
+                            backgroundColor: stock.direction === 'up' 
+                              ? 'rgba(46, 160, 67, 0.3)' 
+                              : 'rgba(248, 81, 73, 0.3)',
+                            '& .MuiChip-label': {
+                              px: 1,
+                              fontSize: '0.875rem',
+                              fontWeight: 600,
+                              color: stock.direction === 'up' 
+                                ? 'rgb(46, 160, 67)' 
+                                : 'rgb(248, 81, 73)'
+                            }
+                          }}
+                        />
+                      </Box>
+
+                      <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+                        <Typography variant="body2" color="text.secondary">
+                          Market Cap: {stock.marketCap}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Volume: {stock.volume}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          P/E: {stock.peRatio}
+                        </Typography>
+                      </Box>
+
+                      {stock.news && stock.news.length > 0 && (
+                        <Box sx={{ mt: 2 }}>
+                          <Button
+                            onClick={() => handleToggleNews(stock.ticker)}
+                            endIcon={expandedNews.includes(stock.ticker) ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                            size="small"
+                            sx={{ 
+                              color: 'text.secondary',
+                              '&:hover': {
+                                backgroundColor: 'rgba(255, 255, 255, 0.05)'
+                              }
+                            }}
+                          >
+                            News
+                          </Button>
+                          <Collapse in={expandedNews.includes(stock.ticker)}>
+                            <List dense sx={{ py: 1 }}>
+                              {stock.news.map((item, index) => (
+                                <ListItem 
+                                  key={index} 
                                   sx={{ 
-                                    color: 'text.primary',
-                                    textDecoration: 'none',
-                                    '&:hover': { textDecoration: 'underline' },
-                                    display: 'block',
-                                    mb: 0.5
+                                    px: 0, 
+                                    py: 0.5,
+                                    display: 'flex',
+                                    alignItems: 'flex-start'
                                   }}
                                 >
-                                  {item.title}
-                                </Typography>
-                                <Typography variant="caption" color="text.secondary" display="block">
-                                  {new Date(item.pubDate).toLocaleDateString()}
-                                </Typography>
-                              </Box>
-                            ))}
-                          </Box>
-                        )}
-                      </Box>
+                                  <ListItemText
+                                    primary={
+                                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                        <Link 
+                                          href={item.link} 
+                                          target="_blank" 
+                                          rel="noopener noreferrer"
+                                          sx={{ 
+                                            color: 'text.primary',
+                                            fontSize: '0.875rem',
+                                            flexGrow: 1,
+                                            whiteSpace: 'nowrap',
+                                            overflow: 'hidden',
+                                            textOverflow: 'ellipsis',
+                                            '&:hover': {
+                                              color: theme.palette.primary.main
+                                            }
+                                          }}
+                                        >
+                                          {item.title}
+                                        </Link>
+                                        <IconButton
+                                          size="small"
+                                          onClick={() => window.open(`https://translate.google.com/translate?sl=en&tl=he&u=${encodeURIComponent(item.link)}`, '_blank')}
+                                          sx={{ 
+                                            ml: 1,
+                                            p: 0.5,
+                                            '&:hover': {
+                                              backgroundColor: 'rgba(255, 255, 255, 0.1)'
+                                            }
+                                          }}
+                                        >
+                                          <TranslateIcon sx={{ fontSize: '1rem' }} />
+                                        </IconButton>
+                                      </Box>
+                                    }
+                                    secondary={
+                                      <Typography variant="caption" color="text.secondary">
+                                        {item.source} - {item.pubDate}
+                                      </Typography>
+                                    }
+                                  />
+                                </ListItem>
+                              ))}
+                            </List>
+                          </Collapse>
+                        </Box>
+                      )}
 
-                      <Box sx={{ 
-                        pt: 2,
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        borderTop: `1px solid ${theme.palette.divider}`
-                      }}>
-                        <Typography variant="caption" color="text.secondary" sx={{ mb: 1 }}>
-                          Last updated: {stock.lastUpdate}
-                        </Typography>
+                      <Box 
+                        sx={{ 
+                          position: 'absolute',
+                          top: 16,
+                          right: 16,
+                          display: 'flex',
+                          gap: 1
+                        }}
+                      >
                         <Button
-                          variant="outlined"
-                          color="error"
                           size="small"
-                          startIcon={<DeleteIcon />}
-                          onClick={() => handleRemoveStock(stock.ticker)}
-                          sx={{ width: '160px' }}
+                          color="error"
+                          onClick={() => removeStock(stock.ticker)}
+                          sx={{
+                            minWidth: 'auto',
+                            p: 1,
+                            borderRadius: '8px',
+                            backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                            '&:hover': {
+                              backgroundColor: theme.palette.error.dark
+                            }
+                          }}
                         >
-                          Remove
+                          <DeleteIcon fontSize="small" />
                         </Button>
                       </Box>
                     </CardContent>

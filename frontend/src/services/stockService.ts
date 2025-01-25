@@ -15,28 +15,31 @@ export interface StockData {
     link: string;
     pubDate: string;
   }[];
+  lastUpdate: string;
 }
 
-export const stockService = {
+class StockService {
   async getStockData(ticker: string): Promise<StockData> {
     try {
       const response = await axios.get(`${BASE_URL}/stock/${ticker}`);
       return response.data;
     } catch (error) {
-      console.error('Error fetching stock data:', error);
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        throw new Error(`Stock ${ticker} not found`);
+      }
       throw new Error('Failed to fetch stock data');
     }
-  },
+  }
 
-  async getStockNews(ticker: string): Promise<StockData['news']> {
+  async getStockNews(ticker: string) {
     try {
       const response = await axios.get(`${BASE_URL}/stock/${ticker}/news`);
       return response.data;
     } catch (error) {
-      console.error('Error fetching stock news:', error);
-      throw new Error('Failed to fetch stock news');
+      console.error('Failed to fetch news:', error);
+      return [];
     }
-  },
+  }
 
   async getSecAnalysis(ticker: string): Promise<string> {
     try {
@@ -47,4 +50,6 @@ export const stockService = {
       throw new Error('Failed to fetch SEC analysis');
     }
   }
-}; 
+}
+
+export const stockService = new StockService(); 
