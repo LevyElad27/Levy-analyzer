@@ -3,10 +3,11 @@
   "version": "1.0.0",
   "description": "Stock Analysis Application with React Frontend and Node.js Backend",
   "scripts": {
-    "start": "cd backend && npm start",
+    "start": "cd backend && npm install && npm start",
     "build": "cd frontend && npm install && npm run build && cd ../backend && npm install",
     "dev": "concurrently \"cd backend && npm run dev\" \"cd frontend && npm run dev\"",
-    "install-deps": "npm install && cd frontend && npm install && cd ../backend && npm install"
+    "install-deps": "npm install && cd frontend && npm install && cd ../backend && npm install",
+    "postinstall": "cd backend && npm install && cd ../frontend && npm install"
   },
   "engines": {
     "node": ">=18.0.0"
