@@ -278,7 +278,7 @@ const AnalysisPage: React.FC = () => {
                 )}
               </Box>
               
-              {basicAnalysis.overview.split('\n\n').map((section, index) => {
+              {basicAnalysis.overview.split('\n\n').map((section) => {
                 const [title, ...content] = section.split('\n');
                 return renderAnalysisSection(
                   title.replace(/^\d+\.\s*/, ''),
