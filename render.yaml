@@ -2,7 +2,7 @@ services:
   - type: web
     name: stock-analysis-backend
     env: node
-    buildCommand: cd backend && npm install --force && cd .. && npm install --force
+    buildCommand: cd backend && npm install --force
     startCommand: node backend/server.js
     envVars:
       - key: NODE_ENV

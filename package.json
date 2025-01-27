@@ -4,9 +4,9 @@
   "description": "Stock Analysis Application with React Frontend and Node.js Backend",
   "scripts": {
     "start": "cd backend && npm start",
-    "build": "cd backend && npm install --legacy-peer-deps",
+    "build": "cd backend && npm install --force",
     "dev": "concurrently \"cd backend && npm run dev\" \"cd frontend && npm run dev\"",
-    "install-deps": "cd backend && npm install --legacy-peer-deps"
+    "install-deps": "cd backend && npm install --force"
   },
   "engines": {
     "node": ">=18.0.0"
