@@ -3,11 +3,11 @@
   "version": "1.0.0",
   "description": "Stock Analysis Application with React Frontend and Node.js Backend",
   "scripts": {
-    "start": "cd backend && npm install && npm start",
-    "build": "cd frontend && npm install && npm run build && cd ../backend && npm install",
+    "start": "cd backend && npm install --legacy-peer-deps && npm start",
+    "build": "cd frontend && npm install --legacy-peer-deps && npm run build && cd ../backend && npm install --legacy-peer-deps",
     "dev": "concurrently \"cd backend && npm run dev\" \"cd frontend && npm run dev\"",
-    "install-deps": "npm install && cd frontend && npm install && cd ../backend && npm install",
-    "postinstall": "cd backend && npm install && cd ../frontend && npm install"
+    "install-deps": "npm install --legacy-peer-deps && cd frontend && npm install --legacy-peer-deps && cd ../backend && npm install --legacy-peer-deps",
+    "postinstall": "cd backend && npm install --legacy-peer-deps && cd ../frontend && npm install --legacy-peer-deps"
   },
   "engines": {
     "node": ">=18.0.0"
