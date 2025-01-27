@@ -2,8 +2,8 @@ services:
   - type: web
     name: stock-analysis-backend
     env: node
-    buildCommand: cd backend && npm install --legacy-peer-deps
-    startCommand: cd backend && node server.js
+    buildCommand: npm install --legacy-peer-deps
+    startCommand: node server.js
     rootDirectory: backend
     envVars:
       - key: NODE_ENV
@@ -23,8 +23,8 @@ services:
   - type: web
     name: stock-analysis-frontend
     env: node
-    buildCommand: cd frontend && npm install --legacy-peer-deps && npm run build
-    startCommand: cd frontend && npm run preview
+    buildCommand: npm install --legacy-peer-deps && npm run build
+    startCommand: npm run preview
     rootDirectory: frontend
     envVars:
       - key: NODE_ENV
