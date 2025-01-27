@@ -3,8 +3,7 @@ services:
     name: stock-analysis-backend
     env: node
     buildCommand: npm install --legacy-peer-deps
-    startCommand: node server.js
-    rootDirectory: backend
+    startCommand: node backend/server.js
     envVars:
       - key: NODE_ENV
         value: production
