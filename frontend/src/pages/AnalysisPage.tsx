@@ -9,19 +9,13 @@ import {
   Paper,
   useTheme,
   useMediaQuery,
-  List,
-  ListItem,
-  ListItemText,
-  IconButton,
-  Snackbar,
-  Alert,
   Accordion,
   AccordionSummary,
   AccordionDetails,
+  Alert,
 } from '@mui/material';
 import { 
   Search as SearchIcon,
-  ContentCopy as ContentCopyIcon,
   ExpandMore as ExpandMoreIcon,
   Description as DescriptionIcon,
 } from '@mui/icons-material';
@@ -305,8 +299,8 @@ const AnalysisPage: React.FC = () => {
             >
               <Typography variant="h5" sx={{ mb: 3 }}>SEC Filings Analysis</Typography>
               
-              {secAnalysis.filings.map((filing, index) => (
-                <Accordion key={index}>
+              {secAnalysis.filings.map((filing) => (
+                <Accordion key={`${filing.type}-${filing.date}`}>
                   <AccordionSummary expandIcon={<ExpandMoreIcon />}>
                     <Typography variant="h6">{filing.type} - {filing.date}</Typography>
                   </AccordionSummary>
