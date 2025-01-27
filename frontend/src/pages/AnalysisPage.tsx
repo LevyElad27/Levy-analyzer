@@ -8,36 +8,153 @@ import {
   CircularProgress,
   Paper,
   useTheme,
-  useMediaQuery
+  useMediaQuery,
+  List,
+  ListItem,
+  ListItemText,
+  IconButton,
+  Snackbar,
+  Alert,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
 } from '@mui/material';
-import { Search as SearchIcon } from '@mui/icons-material';
+import { 
+  Search as SearchIcon,
+  ContentCopy as ContentCopyIcon,
+  ExpandMore as ExpandMoreIcon,
+  Description as DescriptionIcon,
+} from '@mui/icons-material';
+
+interface Filing {
+  type: string;
+  date: string;
+  url: string;
+}
+
+interface AnalysisResponse {
+  ticker: string;
+  yearsAnalyzed: number;
+  filings: Filing[];
+  template: string;
+}
+
+interface ChatGPTAnalysis {
+  ticker: string;
+  analysis: string;
+}
+
+interface BasicAnalysis {
+  ticker: string;
+  overview: string;
+}
+
+interface SECAnalysis {
+  ticker: string;
+  filings: {
+    type: string;
+    date: string;
+    analysis: string;
+  }[];
+}
 
 const AnalysisPage: React.FC = () => {
   const [ticker, setTicker] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [analysis, setAnalysis] = useState<string | null>(null);
+  const [basicAnalysis, setBasicAnalysis] = useState<BasicAnalysis | null>(null);
+  const [secAnalysis, setSecAnalysis] = useState<SECAnalysis | null>(null);
+  const [analysisStep, setAnalysisStep] = useState<'idle' | 'basic' | 'sec'>('idle');
 
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleBasicAnalysis = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!ticker) return;
 
     setLoading(true);
     setError(null);
-    setAnalysis(null);
+    setBasicAnalysis(null);
+    setSecAnalysis(null);
+    setAnalysisStep('basic');
 
     try {
-      // API call will be implemented here
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      setAnalysis('Sample analysis for ' + ticker);
+      const response = await fetch('http://localhost:3002/api/analyze/basic', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ ticker }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Analysis failed');
+      }
+
+      const data = await response.json();
+      setBasicAnalysis(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
       setLoading(false);
+      setAnalysisStep('idle');
     }
+  };
+
+  const handleSECAnalysis = async () => {
+    if (!basicAnalysis) return;
+
+    setLoading(true);
+    setError(null);
+    setAnalysisStep('sec');
+
+    try {
+      const response = await fetch('http://localhost:3002/api/analyze/sec', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ ticker }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'SEC Analysis failed');
+      }
+
+      const data = await response.json();
+      setSecAnalysis(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred');
+    } finally {
+      setLoading(false);
+      setAnalysisStep('idle');
+    }
+  };
+
+  const renderAnalysisSection = (title: string, content: string) => {
+    return (
+      <Accordion defaultExpanded={false}>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Typography variant="h6">{title}</Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Typography 
+            variant="body2" 
+            component="div" 
+            sx={{ 
+              whiteSpace: 'pre-line',
+              direction: 'rtl',
+              textAlign: 'right'
+            }}
+          >
+            {content}
+          </Typography>
+        </AccordionDetails>
+      </Accordion>
+    );
   };
 
   return (
@@ -76,7 +193,7 @@ const AnalysisPage: React.FC = () => {
               textAlign: 'center'
             }}
           >
-            SEC Filings Analysis
+            Company Analysis
           </Typography>
 
           <Paper 
@@ -86,86 +203,134 @@ const AnalysisPage: React.FC = () => {
               mb: 4,
               backgroundColor: theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.02)',
               borderRadius: 2,
-              width: '100%',
-              maxWidth: '600px'
+              width: '100%'
             }}
           >
             <Box 
               component="form" 
-              onSubmit={handleSubmit}
+              onSubmit={handleBasicAnalysis}
               sx={{ 
                 display: 'flex', 
                 gap: 2,
                 flexDirection: isMobile ? 'column' : 'row',
                 width: '100%',
-                justifyContent: 'center'
+                alignItems: 'flex-start'
               }}
             >
               <TextField
-                fullWidth={isMobile}
-                label="Enter Stock Ticker"
+                fullWidth
+                label="Enter Stock Symbol"
                 value={ticker}
                 onChange={(e) => setTicker(e.target.value.toUpperCase())}
                 placeholder="e.g., AAPL"
                 variant="outlined"
                 disabled={loading}
                 size="small"
-                sx={{ 
-                  flexGrow: 1,
-                  maxWidth: isMobile ? '100%' : '400px'
-                }}
+                sx={{ flexGrow: 1 }}
               />
               <Button
                 type="submit"
                 variant="contained"
                 disabled={!ticker || loading}
-                startIcon={loading ? <CircularProgress size={20} /> : <SearchIcon />}
-                sx={{ 
-                  minWidth: isMobile ? '100%' : '120px'
-                }}
+                startIcon={loading && analysisStep === 'basic' ? <CircularProgress size={20} /> : <SearchIcon />}
+                size="small"
+                sx={{ height: '40px', minWidth: 'fit-content' }}
               >
-                Analyze
+                Analyze Company
               </Button>
             </Box>
 
             {error && (
-              <Typography 
-                color="error" 
-                sx={{ 
-                  mt: 2,
-                  fontSize: '0.875rem',
-                  textAlign: 'center'
-                }}
+              <Alert 
+                severity="error" 
+                sx={{ mt: 2 }}
               >
                 {error}
-              </Typography>
+              </Alert>
             )}
           </Paper>
 
-          {analysis && (
+          {loading && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, mt: 4 }}>
+              <CircularProgress />
+              <Typography variant="body2" color="text.secondary">
+                {analysisStep === 'basic' ? 'מנתח מידע בסיסי על החברה...' : 'מנתח דוחות SEC...'}
+              </Typography>
+            </Box>
+          )}
+
+          {basicAnalysis && (
             <Paper 
               sx={{ 
+                width: '100%',
                 p: { xs: 2, sm: 3 },
+                mb: 3,
                 backgroundColor: theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.02)',
                 borderRadius: 2,
-                width: '100%'
               }}
             >
-              <Typography variant="body1">
-                {analysis}
-              </Typography>
+              <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Typography variant="h5">Basic Analysis for {basicAnalysis.ticker}</Typography>
+                {!secAnalysis && (
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    onClick={handleSECAnalysis}
+                    disabled={loading}
+                    startIcon={loading && analysisStep === 'sec' ? <CircularProgress size={20} /> : <DescriptionIcon />}
+                  >
+                    Analyze SEC Filings
+                  </Button>
+                )}
+              </Box>
+              
+              {basicAnalysis.overview.split('\n\n').map((section, index) => {
+                const [title, ...content] = section.split('\n');
+                return renderAnalysisSection(
+                  title.replace(/^\d+\.\s*/, ''),
+                  content.join('\n')
+                );
+              })}
             </Paper>
           )}
 
-          {loading && (
-            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
-              <CircularProgress />
-            </Box>
+          {secAnalysis && (
+            <Paper 
+              sx={{ 
+                width: '100%',
+                p: { xs: 2, sm: 3 },
+                backgroundColor: theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.02)',
+                borderRadius: 2,
+              }}
+            >
+              <Typography variant="h5" sx={{ mb: 3 }}>SEC Filings Analysis</Typography>
+              
+              {secAnalysis.filings.map((filing, index) => (
+                <Accordion key={index}>
+                  <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                    <Typography variant="h6">{filing.type} - {filing.date}</Typography>
+                  </AccordionSummary>
+                  <AccordionDetails>
+                    <Typography 
+                      variant="body2" 
+                      component="div" 
+                      sx={{ 
+                        whiteSpace: 'pre-line',
+                        direction: 'rtl',
+                        textAlign: 'right'
+                      }}
+                    >
+                      {filing.analysis}
+                    </Typography>
+                  </AccordionDetails>
+                </Accordion>
+              ))}
+            </Paper>
           )}
         </Box>
       </Container>
     </Box>
   );
-};
+}
 
 export default AnalysisPage; 
