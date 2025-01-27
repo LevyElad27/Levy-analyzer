@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: stock-analysis-backend
+    env: node
+    buildCommand: cd backend && npm install
+    startCommand: cd backend && npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3002
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: NEWS_API_KEY
+        sync: false
+
+  - type: web
+    name: stock-analysis-frontend
+    env: node
+    buildCommand: cd frontend && npm install && npm run build
+    startCommand: cd frontend && npm run preview
+    envVars:
+      - key: NODE_ENV
+        value: production 

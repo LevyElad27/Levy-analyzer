@@ -26,18 +26,6 @@ interface Filing {
   url: string;
 }
 
-interface AnalysisResponse {
-  ticker: string;
-  yearsAnalyzed: number;
-  filings: Filing[];
-  template: string;
-}
-
-interface ChatGPTAnalysis {
-  ticker: string;
-  analysis: string;
-}
-
 interface BasicAnalysis {
   ticker: string;
   overview: string;

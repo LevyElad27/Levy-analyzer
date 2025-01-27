@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   Container,
   Typography,
@@ -11,27 +11,20 @@ import {
   useTheme,
   useMediaQuery,
   Chip,
-  Divider,
   Paper,
-  CardActions,
   List,
   ListItem,
   ListItemText,
   IconButton,
   CircularProgress,
-  Alert,
   Link,
   Collapse
 } from '@mui/material';
 import {
   Delete as DeleteIcon,
-  TrendingUp as TrendingUpIcon,
-  TrendingDown as TrendingDownIcon,
   Add as AddIcon,
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon,
-  Newspaper as NewsIcon,
-  Article as ArticleIcon,
   Translate as TranslateIcon
 } from '@mui/icons-material';
 import { usePortfolio } from '../hooks/usePortfolio';
