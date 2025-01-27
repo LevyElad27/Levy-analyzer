@@ -8,27 +8,9 @@ const app = express();
 const fs = require('fs').promises;
 const path = require('path');
 
-// Import automation router
-let automationRouter;
-try {
-  automationRouter = require('./dist/routes/automation');
-  if (!automationRouter || !automationRouter.default) {
-    throw new Error('Invalid automation router module');
-  }
-  automationRouter = automationRouter.default;
-  console.log('Successfully imported automation router');
-} catch (error) {
-  console.error('Failed to import automation router:', error);
-  process.exit(1);
-}
-
 // Middleware
 app.use(cors());
 app.use(express.json());
-
-// Mount automation router
-app.use('/api/automation', automationRouter);
-console.log('Mounted automation router at /api/automation');
 
 // Google Finance API configuration
 const GOOGLE_FINANCE_URL = 'https://www.google.com/finance/quote';
