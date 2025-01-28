@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -p tsconfig.prod.json && vite build --minify terser",
+    "build": "vite build --minify terser",
     "preview": "vite preview"
   },
   "dependencies": {
