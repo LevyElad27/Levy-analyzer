@@ -1,17 +1,12 @@
 {
+  "version": 2,
+  "framework": "vite",
   "buildCommand": "cd frontend && npm install --legacy-peer-deps && npm run build",
   "outputDirectory": "frontend/dist",
-  "installCommand": "npm install --legacy-peer-deps",
-  "builds": [
-    {
-      "src": "frontend/package.json",
-      "use": "@vercel/node"
-    }
-  ],
-  "cacheDirectories": [
-    "node_modules",
-    "frontend/node_modules",
-    ".next/cache"
+  "installCommand": "cd frontend && npm install --legacy-peer-deps",
+  "routes": [
+    { "handle": "filesystem" },
+    { "src": "/(.*)", "dest": "/" }
   ],
   "build": {
     "env": {
