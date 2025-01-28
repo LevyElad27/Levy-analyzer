@@ -19,6 +19,7 @@ import {
   ExpandMore as ExpandMoreIcon,
   Description as DescriptionIcon,
 } from '@mui/icons-material';
+import { BASE_URL } from '../config';
 
 interface Filing {
   type: string;
@@ -62,7 +63,7 @@ const AnalysisPage: React.FC = () => {
     setAnalysisStep('basic');
 
     try {
-      const response = await fetch('http://localhost:3002/api/analyze/basic', {
+      const response = await fetch(`${BASE_URL}/analyze/basic`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -93,7 +94,7 @@ const AnalysisPage: React.FC = () => {
     setAnalysisStep('sec');
 
     try {
-      const response = await fetch('http://localhost:3002/api/analyze/sec', {
+      const response = await fetch(`${BASE_URL}/analyze/sec`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

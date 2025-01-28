@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
+import { BASE_URL } from '../config';
 
 interface Stock {
   ticker: string;
@@ -42,8 +43,8 @@ export const usePortfolio = () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await axios.get(`http://localhost:3002/api/stock/${ticker}`);
-      const newsResponse = await axios.get(`http://localhost:3002/api/stock/${ticker}/news`);
+      const response = await axios.get(`${BASE_URL}/stock/${ticker}`);
+      const newsResponse = await axios.get(`${BASE_URL}/stock/${ticker}/news`);
       
       const stockData = {
         ...response.data,
@@ -74,8 +75,8 @@ export const usePortfolio = () => {
       const updatedStocks = await Promise.all(
         stocks.map(async (stock) => {
           const [stockResponse, newsResponse] = await Promise.all([
-            axios.get(`http://localhost:3002/api/stock/${stock.ticker}`),
-            axios.get(`http://localhost:3002/api/stock/${stock.ticker}/news`)
+            axios.get(`${BASE_URL}/stock/${stock.ticker}`),
+            axios.get(`${BASE_URL}/stock/${stock.ticker}/news`)
           ]);
           
           return {

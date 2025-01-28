@@ -28,6 +28,7 @@ import {
   Translate as TranslateIcon
 } from '@mui/icons-material';
 import { usePortfolio } from '../hooks/usePortfolio';
+import { BASE_URL } from '../config';
 
 interface NewsItem {
   title: string;
@@ -83,7 +84,7 @@ const PortfolioPage: React.FC = () => {
       setTranslating(prev => ({ ...prev, [translationKey]: true }));
       setTranslationErrors(prev => ({ ...prev, [translationKey]: '' }));
       
-      const response = await fetch('http://localhost:3002/api/translate', {
+      const response = await fetch(`${BASE_URL}/translate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
