@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const BASE_URL = 'http://localhost:3002/api';
+const BASE_URL = 'https://levy-analyzer.onrender.com/api';
 
 export interface StockData {
   ticker: string;
