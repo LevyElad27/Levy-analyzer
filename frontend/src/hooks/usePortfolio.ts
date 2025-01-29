@@ -89,7 +89,14 @@ export const usePortfolio = () => {
             const newsResponse = await axios.get(`${BASE_URL}/stock/${stock.ticker}/news`);
             newsData = newsResponse.data;
           } catch (newsError) {
-            console.warn(`Failed to fetch news for ${stock.ticker}:`, newsError);
+            if (axios.isAxiosError(newsError)) {
+              console.error('News API Error:', {
+                status: newsError.response?.status,
+                statusText: newsError.response?.statusText,
+                data: newsError.response?.data,
+                headers: newsError.response?.headers
+              });
+            }
             // Keep existing news if available
             newsData = stock.news || [];
           }
