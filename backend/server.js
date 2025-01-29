@@ -576,7 +576,7 @@ app.get('/api/stock/:ticker', async (req, res) => {
   }
 });
 
-// Get stock news from Yahoo Finance
+// Get stock news from Yahoo Finance using web scraping
 app.get('/api/stock/:ticker/news', async (req, res) => {
   try {
     const { ticker } = req.params;
@@ -588,29 +588,51 @@ app.get('/api/stock/:ticker/news', async (req, res) => {
       return res.json(cached.data);
     }
 
-    const yahooNewsUrl = `${YAHOO_BASE_URL}/finance/v2/quote?symbols=${ticker}&newsCount=5`;
-    
-    const response = await axios.get(yahooNewsUrl, { headers });
-    
-    if (!response.data?.quoteResponse?.result?.[0]?.news) {
+    const url = `https://finance.yahoo.com/quote/${ticker}/news`;
+    const response = await axios.get(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+      }
+    });
+
+    const $ = require('cheerio').load(response.data);
+    const news = [];
+
+    // Find news articles
+    $('h3').each((i, element) => {
+      const titleElement = $(element);
+      const linkElement = titleElement.find('a');
+      
+      if (linkElement.length > 0) {
+        const title = titleElement.text().trim();
+        const link = 'https://finance.yahoo.com' + linkElement.attr('href');
+        const source = 'Yahoo Finance';
+        const pubDate = new Date().toLocaleString(); // Default to current time if not found
+
+        news.push({
+          title,
+          link,
+          source,
+          pubDate,
+          description: title // Using title as description since full content requires additional requests
+        });
+      }
+    });
+
+    if (news.length === 0) {
       throw new Error('No news data available');
     }
 
-    const news = response.data.quoteResponse.result[0].news.map(item => ({
-      title: item.title,
-      link: item.link,
-      source: item.publisher,
-      pubDate: new Date(item.providerPublishTime * 1000).toLocaleString(),
-      description: item.summary
-    }));
+    // Limit to 5 most recent news items
+    const limitedNews = news.slice(0, 5);
 
     // Cache the result
     newsCache.set(cacheKey, {
       timestamp: Date.now(),
-      data: news
+      data: limitedNews
     });
 
-    res.json(news);
+    res.json(limitedNews);
   } catch (error) {
     console.error('Error fetching Yahoo news:', error);
     res.status(500).json({
