@@ -580,12 +580,41 @@ app.get('/api/stock/:ticker', async (req, res) => {
 app.get('/api/stock/:ticker/news', async (req, res) => {
   try {
     const { ticker } = req.params;
-    const news = await fetchNewsWithCache(ticker);
+    
+    // Check cache first
+    const cacheKey = `news_${ticker}`;
+    const cached = newsCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < NEWS_CACHE_DURATION) {
+      return res.json(cached.data);
+    }
+
+    const yahooNewsUrl = `${YAHOO_BASE_URL}/finance/v2/quote?symbols=${ticker}&newsCount=5`;
+    
+    const response = await axios.get(yahooNewsUrl, { headers });
+    
+    if (!response.data?.quoteResponse?.result?.[0]?.news) {
+      throw new Error('No news data available');
+    }
+
+    const news = response.data.quoteResponse.result[0].news.map(item => ({
+      title: item.title,
+      link: item.link,
+      source: item.publisher,
+      pubDate: new Date(item.providerPublishTime * 1000).toLocaleString(),
+      description: item.summary
+    }));
+
+    // Cache the result
+    newsCache.set(cacheKey, {
+      timestamp: Date.now(),
+      data: news
+    });
+
     res.json(news);
   } catch (error) {
-    console.error('Error fetching news:', error.message);
-    res.status(error.response?.status || 500).json({
-      error: 'Error fetching news',
+    console.error('Error fetching Yahoo news:', error);
+    res.status(500).json({
+      error: 'Failed to fetch news',
       message: error.message
     });
   }
