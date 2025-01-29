@@ -922,7 +922,29 @@ Write your analysis in Hebrew. Each section should be comprehensive and detailed
   }
 });
 
+// Add error handling for uncaught exceptions
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  // Give time for logs to be written before exiting
+  setTimeout(() => process.exit(1), 1000);
+});
+
+process.on('unhandledRejection', (error) => {
+  console.error('Unhandled Rejection:', error);
+});
+
 const PORT = process.env.PORT || 3002;
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', (error) => {
+  if (error) {
+    console.error('Error starting server:', error);
+    return;
+  }
   console.log(`Server is running on port ${PORT}`);
+  console.log('Environment:', process.env.NODE_ENV);
+  console.log('Memory usage:', process.memoryUsage());
+});
+
+// Add health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok' });
 });
