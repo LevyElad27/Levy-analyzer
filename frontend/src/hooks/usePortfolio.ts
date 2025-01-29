@@ -44,11 +44,19 @@ export const usePortfolio = () => {
     setError(null);
     try {
       const response = await axios.get(`${BASE_URL}/stock/${ticker}`);
-      const newsResponse = await axios.get(`${BASE_URL}/stock/${ticker}/news`);
+      let newsData = [];
+      
+      try {
+        const newsResponse = await axios.get(`${BASE_URL}/stock/${ticker}/news`);
+        newsData = newsResponse.data;
+      } catch (newsError) {
+        console.warn('Failed to fetch news:', newsError);
+        // Continue without news data
+      }
       
       const stockData = {
         ...response.data,
-        news: newsResponse.data
+        news: newsData
       };
 
       if (stocks.some(s => s.ticker === stockData.ticker)) {
