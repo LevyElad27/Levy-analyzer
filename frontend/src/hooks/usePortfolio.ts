@@ -82,14 +82,21 @@ export const usePortfolio = () => {
     try {
       const updatedStocks = await Promise.all(
         stocks.map(async (stock) => {
-          const [stockResponse, newsResponse] = await Promise.all([
-            axios.get(`${BASE_URL}/stock/${stock.ticker}`),
-            axios.get(`${BASE_URL}/stock/${stock.ticker}/news`)
-          ]);
+          const stockResponse = await axios.get(`${BASE_URL}/stock/${stock.ticker}`);
+          let newsData = [];
+          
+          try {
+            const newsResponse = await axios.get(`${BASE_URL}/stock/${stock.ticker}/news`);
+            newsData = newsResponse.data;
+          } catch (newsError) {
+            console.warn(`Failed to fetch news for ${stock.ticker}:`, newsError);
+            // Keep existing news if available
+            newsData = stock.news || [];
+          }
           
           return {
             ...stockResponse.data,
-            news: newsResponse.data
+            news: newsData
           };
         })
       );
