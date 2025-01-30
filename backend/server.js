@@ -473,40 +473,34 @@ app.get('/api/stock/:ticker', async (req, res) => {
       return res.json(cached.data);
     }
 
-    // Set a shorter timeout for the request
-    const stockResponse = await axios.get(`${YAHOO_BASE_URL}/v8/finance/chart/${actualTicker}`, {
-      timeout: 5000 // 5 second timeout
-    });
-
-    if (!stockResponse.data?.chart?.result?.[0]) {
-      throw new Error('Invalid stock data response');
-    }
-
-    const stockResult = stockResponse.data.chart.result[0];
-    const price = stockResult.meta.regularMarketPrice;
-    const previousClose = stockResult.meta.previousClose;
-    const change = price - previousClose;
-    const changePercent = (change / previousClose) * 100;
-    const direction = change >= 0 ? 'up' : 'down';
-    
-    // Get additional market data with timeout
-    const quoteResponse = await axios.get(`${YAHOO_BASE_URL}/v6/finance/quote/${actualTicker}`, {
+    // Get quote data first
+    const quoteUrl = `${YAHOO_BASE_URL}/v7/finance/quote?symbols=${actualTicker}`;
+    const quoteResponse = await axios.get(quoteUrl, {
       timeout: 5000
     });
 
-    const marketData = quoteResponse.data?.quoteResponse?.result?.[0] || {};
-    const companyName = marketData.longName || marketData.shortName;
+    if (!quoteResponse.data?.quoteResponse?.result?.[0]) {
+      throw new Error('Stock not found');
+    }
+
+    const quote = quoteResponse.data.quoteResponse.result[0];
+    const price = quote.regularMarketPrice;
+    const previousClose = quote.regularMarketPreviousClose;
+    const change = quote.regularMarketChange;
+    const changePercent = quote.regularMarketChangePercent;
+    const direction = change >= 0 ? 'up' : 'down';
+    const companyName = quote.longName || quote.shortName;
 
     const stockData = {
       ticker: actualTicker,
       name: companyName || actualTicker,
-      price,
+      price: parseFloat(price.toFixed(2)),
       change: parseFloat(change.toFixed(2)),
       changePercent: parseFloat(changePercent.toFixed(2)),
       direction,
-      marketCap: marketData.marketCap ? formatMarketCap(marketData.marketCap) : 'N/A',
-      volume: marketData.volume ? formatVolume(marketData.volume) : 'N/A',
-      peRatio: marketData.peRatio?.toFixed(2) || 'N/A',
+      marketCap: quote.marketCap ? formatMarketCap(quote.marketCap) : 'N/A',
+      volume: quote.regularMarketVolume ? formatVolume(quote.regularMarketVolume) : 'N/A',
+      peRatio: quote.forwardPE?.toFixed(2) || quote.trailingPE?.toFixed(2) || 'N/A',
       lastUpdate: new Date().toLocaleString()
     };
 
@@ -519,10 +513,10 @@ app.get('/api/stock/:ticker', async (req, res) => {
     res.json(stockData);
   } catch (error) {
     console.error('Error fetching stock data:', error.message);
-    const errorMessage = error.response?.status === 404 
+    const errorMessage = error.message === 'Stock not found'
       ? `Stock ${req.params.ticker} not found`
       : 'Failed to fetch stock data: ' + error.message;
-    res.status(error.response?.status || 500).json({ error: errorMessage });
+    res.status(error.message === 'Stock not found' ? 404 : 500).json({ error: errorMessage });
   }
 });
 
