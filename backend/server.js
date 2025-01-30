@@ -588,86 +588,44 @@ app.get('/api/stock/:ticker/news', async (req, res) => {
       return res.json(cached.data);
     }
 
-    // Use Google News search URL
-    const searchUrl = `https://news.google.com/search?q=${encodeURIComponent(ticker + ' stock')}&hl=en-US&gl=US&ceid=US:en`;
+    // Use Google News search with news tab directly (faster than news.google.com)
+    const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(ticker + ' stock news')}&tbm=nws`;
     
     const response = await axios.get(searchUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-      }
+      },
+      timeout: 5000 // 5 second timeout
     });
 
     const $ = require('cheerio').load(response.data);
     const news = [];
-
-    // Find news articles from Google News
-    $('article').each((i, element) => {
+    
+    // Find news articles from Google News tab
+    $('.g').each((i, element) => {
       if (news.length >= 5) return false; // Only get first 5 news items
 
       const article = $(element);
       const titleElement = article.find('h3');
       const linkElement = article.find('a');
-      const timeElement = article.find('time');
-      const sourceElement = article.find('div[data-n-tid]');
+      const snippetElement = article.find('.VwiC3b');
+      const sourceElement = article.find('.CEMjEf');
 
       if (titleElement.length && linkElement.length) {
         const title = titleElement.text().trim();
-        // Google News uses relative URLs, convert to absolute
-        const relativeLink = linkElement.attr('href');
-        const link = relativeLink.startsWith('/articles/') 
-          ? 'https://news.google.com' + relativeLink.slice(1)
-          : relativeLink;
-        const source = sourceElement.text().trim() || 'Google News';
-        const pubDate = timeElement.attr('datetime') 
-          ? new Date(timeElement.attr('datetime')).toLocaleString()
-          : new Date().toLocaleString();
+        const link = linkElement.attr('href');
+        const source = sourceElement.text().trim() || 'News';
+        const description = snippetElement.text().trim() || title;
 
         news.push({
           title,
           link,
           source,
-          pubDate,
-          description: title // Using title as description since full content requires additional requests
+          pubDate: new Date().toLocaleString(),
+          description
         });
       }
     });
-
-    if (news.length === 0) {
-      // If no news found, try searching regular Google
-      const googleSearchUrl = `https://www.google.com/search?q=${encodeURIComponent(ticker + ' stock news')}&tbm=nws`;
-      const googleResponse = await axios.get(googleSearchUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-      });
-
-      const $google = require('cheerio').load(googleResponse.data);
-      
-      $google('.g').each((i, element) => {
-        if (news.length >= 5) return false;
-
-        const article = $google(element);
-        const titleElement = article.find('h3');
-        const linkElement = article.find('a');
-        const snippetElement = article.find('.VwiC3b');
-        const sourceElement = article.find('.CEMjEf');
-
-        if (titleElement.length && linkElement.length) {
-          const title = titleElement.text().trim();
-          const link = linkElement.attr('href');
-          const source = sourceElement.text().trim() || 'News';
-          const description = snippetElement.text().trim() || title;
-
-          news.push({
-            title,
-            link,
-            source,
-            pubDate: new Date().toLocaleString(),
-            description
-          });
-        }
-      });
-    }
 
     if (news.length === 0) {
       throw new Error('No news data available');
