@@ -576,7 +576,7 @@ app.get('/api/stock/:ticker', async (req, res) => {
   }
 });
 
-// Get stock news using Google Custom Search API with fallback
+// Get stock news by scraping Google News
 app.get('/api/stock/:ticker/news', async (req, res) => {
   try {
     const { ticker } = req.params;
@@ -588,95 +588,117 @@ app.get('/api/stock/:ticker/news', async (req, res) => {
       return res.json(cached.data);
     }
 
-    const googleApiKey = process.env.GOOGLE_API_KEY;
-    const searchEngineId = process.env.GOOGLE_SEARCH_ENGINE_ID;
-
-    if (!googleApiKey || !searchEngineId) {
-      throw new Error('Google API configuration is missing');
-    }
-
-    try {
-      const searchQuery = `${ticker} stock news financial`;
-      const url = `https://www.googleapis.com/customsearch/v1?key=${googleApiKey}&cx=${searchEngineId}&q=${encodeURIComponent(searchQuery)}&num=5&dateRestrict=m1`;
-
-      const response = await axios.get(url);
-      
-      if (!response.data.items || response.data.items.length === 0) {
-        throw new Error('No news data available');
+    // Use Google News search URL
+    const searchUrl = `https://news.google.com/search?q=${encodeURIComponent(ticker + ' stock')}&hl=en-US&gl=US&ceid=US:en`;
+    
+    const response = await axios.get(searchUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
       }
+    });
 
-      const news = response.data.items.map(item => ({
-        title: item.title,
-        link: item.link,
-        source: item.displayLink || 'Google News',
-        pubDate: new Date().toLocaleString(),
-        description: item.snippet || item.title
-      }));
+    const $ = require('cheerio').load(response.data);
+    const news = [];
 
-      // Cache the result
-      newsCache.set(cacheKey, {
-        timestamp: Date.now(),
-        data: news
+    // Find news articles from Google News
+    $('article').each((i, element) => {
+      if (news.length >= 5) return false; // Only get first 5 news items
+
+      const article = $(element);
+      const titleElement = article.find('h3');
+      const linkElement = article.find('a');
+      const timeElement = article.find('time');
+      const sourceElement = article.find('div[data-n-tid]');
+
+      if (titleElement.length && linkElement.length) {
+        const title = titleElement.text().trim();
+        // Google News uses relative URLs, convert to absolute
+        const relativeLink = linkElement.attr('href');
+        const link = relativeLink.startsWith('/articles/') 
+          ? 'https://news.google.com' + relativeLink.slice(1)
+          : relativeLink;
+        const source = sourceElement.text().trim() || 'Google News';
+        const pubDate = timeElement.attr('datetime') 
+          ? new Date(timeElement.attr('datetime')).toLocaleString()
+          : new Date().toLocaleString();
+
+        news.push({
+          title,
+          link,
+          source,
+          pubDate,
+          description: title // Using title as description since full content requires additional requests
+        });
+      }
+    });
+
+    if (news.length === 0) {
+      // If no news found, try searching regular Google
+      const googleSearchUrl = `https://www.google.com/search?q=${encodeURIComponent(ticker + ' stock news')}&tbm=nws`;
+      const googleResponse = await axios.get(googleSearchUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
       });
 
-      return res.json(news);
-    } catch (googleError) {
-      console.error('Google API Error:', googleError.response?.data || googleError.message);
+      const $google = require('cheerio').load(googleResponse.data);
       
-      // Fallback to a simpler search using Bing News API
-      const fallbackUrl = `https://api.bing.microsoft.com/v7.0/news/search?q=${encodeURIComponent(ticker)}%20stock&count=5&freshness=Month`;
-      try {
-        const bingResponse = await axios.get(fallbackUrl, {
-          headers: {
-            'Ocp-Apim-Subscription-Key': process.env.BING_API_KEY || ''
-          }
-        });
+      $google('.g').each((i, element) => {
+        if (news.length >= 5) return false;
 
-        if (bingResponse.data.value && bingResponse.data.value.length > 0) {
-          const news = bingResponse.data.value.map(item => ({
-            title: item.name,
-            link: item.url,
-            source: item.provider[0]?.name || 'News',
-            pubDate: new Date(item.datePublished).toLocaleString(),
-            description: item.description
-          }));
+        const article = $google(element);
+        const titleElement = article.find('h3');
+        const linkElement = article.find('a');
+        const snippetElement = article.find('.VwiC3b');
+        const sourceElement = article.find('.CEMjEf');
 
-          // Cache the result
-          newsCache.set(cacheKey, {
-            timestamp: Date.now(),
-            data: news
+        if (titleElement.length && linkElement.length) {
+          const title = titleElement.text().trim();
+          const link = linkElement.attr('href');
+          const source = sourceElement.text().trim() || 'News';
+          const description = snippetElement.text().trim() || title;
+
+          news.push({
+            title,
+            link,
+            source,
+            pubDate: new Date().toLocaleString(),
+            description
           });
-
-          return res.json(news);
         }
-      } catch (bingError) {
-        console.error('Bing API Error:', bingError.response?.data || bingError.message);
-        
-        // If both APIs fail, return a default response with market data
-        const defaultNews = [{
-          title: `Latest Market Data for ${ticker}`,
-          link: `https://finance.yahoo.com/quote/${ticker}`,
-          source: 'Market Data',
-          pubDate: new Date().toLocaleString(),
-          description: `View the latest market data and trading information for ${ticker}.`
-        }];
-
-        // Cache the default result for a shorter duration
-        newsCache.set(cacheKey, {
-          timestamp: Date.now(),
-          data: defaultNews
-        });
-
-        return res.json(defaultNews);
-      }
+      });
     }
+
+    if (news.length === 0) {
+      throw new Error('No news data available');
+    }
+
+    // Cache the result
+    newsCache.set(cacheKey, {
+      timestamp: Date.now(),
+      data: news
+    });
+
+    return res.json(news);
   } catch (error) {
     console.error('Error in news endpoint:', error);
-    res.status(500).json({
-      error: 'Failed to fetch news',
-      message: error.message || 'Unknown error occurred',
-      details: error.response?.data?.error?.message || ''
+    
+    // Fallback to a basic market data response if scraping fails
+    const defaultNews = [{
+      title: `Latest Market Data for ${ticker}`,
+      link: `https://finance.yahoo.com/quote/${ticker}`,
+      source: 'Market Data',
+      pubDate: new Date().toLocaleString(),
+      description: `View the latest market data and trading information for ${ticker}.`
+    }];
+
+    // Cache the default result for a shorter duration
+    newsCache.set(cacheKey, {
+      timestamp: Date.now(),
+      data: defaultNews
     });
+
+    return res.json(defaultNews);
   }
 });
 
