@@ -456,109 +456,59 @@ function getCachedData(cache, key) {
   return null;
 }
 
-// Get stock data from Google Finance
+// Cache durations
+const CACHE_DURATIONS = {
+  STOCK: 30 * 1000, // 30 seconds for stock data
+  NEWS: 5 * 60 * 1000 // 5 minutes for news
+};
+
+// Get stock data with optimized caching and error handling
 app.get('/api/stock/:ticker', async (req, res) => {
   try {
-    const { ticker } = req.params;
-    const tickerMap = {
-      'meta': 'META',
-      'facebook': 'META',
-      'google': 'GOOGL',
-      'alphabet': 'GOOGL',
-      'amazon': 'AMZN',
-      'apple': 'AAPL',
-      'microsoft': 'MSFT'
-    };
-
-    const actualTicker = tickerMap[ticker.toLowerCase()] || ticker.toUpperCase();
+    const actualTicker = req.params.ticker.toUpperCase();
     
     // Check cache first
-    const cachedData = getCachedData(cache.stockData, actualTicker);
-    if (cachedData) {
-      return res.json(cachedData);
+    const cached = cache.stockData.get(actualTicker);
+    if (cached && Date.now() - cached.timestamp < CACHE_DURATIONS.STOCK) {
+      return res.json(cached.data);
     }
 
-    // Try different exchanges in order
-    const exchanges = ['NASDAQ', 'NYSE', 'NYSEARCA', 'BATS'];
-    let stockData = null;
-    let error = null;
+    // Set a shorter timeout for the request
+    const stockResponse = await axios.get(`${YAHOO_BASE_URL}/v8/finance/chart/${actualTicker}`, {
+      timeout: 5000 // 5 second timeout
+    });
 
-    for (const exchange of exchanges) {
-      try {
-        const response = await axios.get(`${GOOGLE_FINANCE_URL}/${actualTicker}:${exchange}`, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-          },
-          timeout: 5000
-        });
-
-        const $ = require('cheerio').load(response.data);
-        
-        // Find the main price element
-        const priceText = $('.YMlKec.fxKbKc').first().text().trim();
-        if (!priceText) continue;
-        
-        const price = parseFloat(priceText.replace(/[^\d.-]/g, ''));
-        if (isNaN(price)) continue;
-
-        // Find the company name
-        const companyName = $('div[class="zzDege"]').first().text().trim();
-
-        // Try different selectors for price changes
-        const priceChangeElement = $('.P2Luy').first();
-        const changeText = priceChangeElement.text().trim();
-
-        let change = 0;
-        let changePercent = 0;
-        let direction = 'up';
-
-        if (changeText) {
-            const matches = changeText.match(/([-+]?\d+\.?\d*)\s*\(([-+]?\d+\.?\d*)%\)/);
-            if (matches) {
-                change = parseFloat(matches[1]);
-                changePercent = parseFloat(matches[2]);
-                direction = change < 0 ? 'down' : 'up';
-            }
-        }
-
-        // Extract market data from the table
-        const marketData = {};
-        $('.gyFHrc').each((i, elem) => {
-          const label = $(elem).find('.mfs7Fc').text().trim();
-          const value = $(elem).find('.P6K39c').text().trim();
-          
-          if (label.includes('Market cap')) {
-            marketData.marketCap = value;
-          } else if (label.includes('P/E ratio')) {
-            marketData.peRatio = value;
-          } else if (label.includes('Volume')) {
-            marketData.volume = value;
-          }
-        });
-
-        stockData = {
-          ticker: actualTicker,
-          name: companyName || actualTicker,
-          price,
-          change,
-          changePercent,
-          direction,
-          marketCap: marketData.marketCap || 'N/A',
-          volume: marketData.volume || 'N/A',
-          peRatio: marketData.peRatio || 'N/A',
-          lastUpdate: new Date().toLocaleString()
-        };
-
-        break;
-      } catch (e) {
-        error = e;
-        continue;
-      }
+    if (!stockResponse.data?.chart?.result?.[0]) {
+      throw new Error('Invalid stock data response');
     }
 
-    if (!stockData) {
-      throw error || new Error('Failed to fetch stock data from any exchange');
-    }
+    const stockResult = stockResponse.data.chart.result[0];
+    const price = stockResult.meta.regularMarketPrice;
+    const previousClose = stockResult.meta.previousClose;
+    const change = price - previousClose;
+    const changePercent = (change / previousClose) * 100;
+    const direction = change >= 0 ? 'up' : 'down';
+    
+    // Get additional market data with timeout
+    const quoteResponse = await axios.get(`${YAHOO_BASE_URL}/v6/finance/quote/${actualTicker}`, {
+      timeout: 5000
+    });
+
+    const marketData = quoteResponse.data?.quoteResponse?.result?.[0] || {};
+    const companyName = marketData.longName || marketData.shortName;
+
+    const stockData = {
+      ticker: actualTicker,
+      name: companyName || actualTicker,
+      price,
+      change: parseFloat(change.toFixed(2)),
+      changePercent: parseFloat(changePercent.toFixed(2)),
+      direction,
+      marketCap: marketData.marketCap ? formatMarketCap(marketData.marketCap) : 'N/A',
+      volume: marketData.volume ? formatVolume(marketData.volume) : 'N/A',
+      peRatio: marketData.peRatio?.toFixed(2) || 'N/A',
+      lastUpdate: new Date().toLocaleString()
+    };
 
     // Cache the result
     cache.stockData.set(actualTicker, {
@@ -576,7 +526,21 @@ app.get('/api/stock/:ticker', async (req, res) => {
   }
 });
 
-// Get stock news by scraping Google News
+// Helper functions for formatting
+function formatMarketCap(value) {
+  if (value >= 1e12) return (value / 1e12).toFixed(2) + 'T USD';
+  if (value >= 1e9) return (value / 1e9).toFixed(2) + 'B USD';
+  if (value >= 1e6) return (value / 1e6).toFixed(2) + 'M USD';
+  return value.toFixed(2) + ' USD';
+}
+
+function formatVolume(value) {
+  if (value >= 1e6) return (value / 1e6).toFixed(2) + 'M';
+  if (value >= 1e3) return (value / 1e3).toFixed(2) + 'K';
+  return value.toString();
+}
+
+// Get stock news with optimized scraping
 app.get('/api/stock/:ticker/news', async (req, res) => {
   try {
     const { ticker } = req.params;
@@ -584,64 +548,35 @@ app.get('/api/stock/:ticker/news', async (req, res) => {
     // Check cache first
     const cacheKey = `news_${ticker}`;
     const cached = newsCache.get(cacheKey);
-    if (cached && Date.now() - cached.timestamp < NEWS_CACHE_DURATION) {
+    if (cached && Date.now() - cached.timestamp < CACHE_DURATIONS.NEWS) {
       return res.json(cached.data);
     }
 
-    // Use Google News search with news tab directly (faster than news.google.com)
-    const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(ticker + ' stock news')}&tbm=nws`;
-    
-    const response = await axios.get(searchUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-      },
+    // Use Yahoo Finance news API instead of scraping (more reliable)
+    const newsUrl = `${YAHOO_BASE_URL}/v1/finance/search?q=${encodeURIComponent(ticker)}&newsCount=5&quotesCount=0`;
+    const response = await axios.get(newsUrl, {
       timeout: 5000 // 5 second timeout
     });
 
-    const $ = require('cheerio').load(response.data);
-    const news = [];
-    
-    // Find news articles from Google News tab
-    $('.g').each((i, element) => {
-      if (news.length >= 5) return false; // Only get first 5 news items
+    if (response.data?.news?.length > 0) {
+      const news = response.data.news.map(item => ({
+        title: item.title,
+        link: item.link,
+        source: item.publisher,
+        pubDate: new Date(item.providerPublishTime * 1000).toLocaleString(),
+        description: item.snippet
+      }));
 
-      const article = $(element);
-      const titleElement = article.find('h3');
-      const linkElement = article.find('a');
-      const snippetElement = article.find('.VwiC3b');
-      const sourceElement = article.find('.CEMjEf');
+      // Cache the result
+      newsCache.set(cacheKey, {
+        timestamp: Date.now(),
+        data: news
+      });
 
-      if (titleElement.length && linkElement.length) {
-        const title = titleElement.text().trim();
-        const link = linkElement.attr('href');
-        const source = sourceElement.text().trim() || 'News';
-        const description = snippetElement.text().trim() || title;
-
-        news.push({
-          title,
-          link,
-          source,
-          pubDate: new Date().toLocaleString(),
-          description
-        });
-      }
-    });
-
-    if (news.length === 0) {
-      throw new Error('No news data available');
+      return res.json(news);
     }
 
-    // Cache the result
-    newsCache.set(cacheKey, {
-      timestamp: Date.now(),
-      data: news
-    });
-
-    return res.json(news);
-  } catch (error) {
-    console.error('Error in news endpoint:', error);
-    
-    // Fallback to a basic market data response if scraping fails
+    // Fallback to a basic market data response
     const defaultNews = [{
       title: `Latest Market Data for ${ticker}`,
       link: `https://finance.yahoo.com/quote/${ticker}`,
@@ -650,13 +585,22 @@ app.get('/api/stock/:ticker/news', async (req, res) => {
       description: `View the latest market data and trading information for ${ticker}.`
     }];
 
-    // Cache the default result for a shorter duration
+    // Cache the default result
     newsCache.set(cacheKey, {
       timestamp: Date.now(),
       data: defaultNews
     });
 
     return res.json(defaultNews);
+  } catch (error) {
+    console.error('Error in news endpoint:', error);
+    res.status(500).json([{
+      title: `Latest Market Data for ${ticker}`,
+      link: `https://finance.yahoo.com/quote/${ticker}`,
+      source: 'Market Data',
+      pubDate: new Date().toLocaleString(),
+      description: `View the latest market data and trading information for ${ticker}.`
+    }]);
   }
 });
 
