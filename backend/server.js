@@ -576,7 +576,7 @@ app.get('/api/stock/:ticker', async (req, res) => {
   }
 });
 
-// Get stock news from Yahoo Finance using web scraping
+// Get stock news using Google Custom Search API
 app.get('/api/stock/:ticker/news', async (req, res) => {
   try {
     const { ticker } = req.params;
@@ -588,56 +588,42 @@ app.get('/api/stock/:ticker/news', async (req, res) => {
       return res.json(cached.data);
     }
 
-    const url = `https://finance.yahoo.com/quote/${ticker}/news`;
-    const response = await axios.get(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-      }
-    });
+    const googleApiKey = process.env.GOOGLE_API_KEY;
+    const searchEngineId = process.env.GOOGLE_SEARCH_ENGINE_ID;
 
-    const $ = require('cheerio').load(response.data);
-    const news = [];
+    if (!googleApiKey || !searchEngineId) {
+      throw new Error('Google API configuration is missing');
+    }
 
-    // Find news articles
-    $('h3').each((i, element) => {
-      const titleElement = $(element);
-      const linkElement = titleElement.find('a');
-      
-      if (linkElement.length > 0) {
-        const title = titleElement.text().trim();
-        const link = 'https://finance.yahoo.com' + linkElement.attr('href');
-        const source = 'Yahoo Finance';
-        const pubDate = new Date().toLocaleString(); // Default to current time if not found
+    const searchQuery = `${ticker} stock news`;
+    const url = `https://www.googleapis.com/customsearch/v1?key=${googleApiKey}&cx=${searchEngineId}&q=${encodeURIComponent(searchQuery)}&num=5&dateRestrict=m1`;
 
-        news.push({
-          title,
-          link,
-          source,
-          pubDate,
-          description: title // Using title as description since full content requires additional requests
-        });
-      }
-    });
-
-    if (news.length === 0) {
+    const response = await axios.get(url);
+    
+    if (!response.data.items || response.data.items.length === 0) {
       throw new Error('No news data available');
     }
 
-    // Limit to 5 most recent news items
-    const limitedNews = news.slice(0, 5);
+    const news = response.data.items.map(item => ({
+      title: item.title,
+      link: item.link,
+      source: item.displayLink || 'Google News',
+      pubDate: new Date().toLocaleString(), // Google API doesn't always provide dates
+      description: item.snippet || item.title
+    }));
 
     // Cache the result
     newsCache.set(cacheKey, {
       timestamp: Date.now(),
-      data: limitedNews
+      data: news
     });
 
-    res.json(limitedNews);
+    res.json(news);
   } catch (error) {
-    console.error('Error fetching Yahoo news:', error);
+    console.error('Error fetching Google news:', error);
     res.status(500).json({
       error: 'Failed to fetch news',
-      message: error.message
+      message: error.message || 'Unknown error occurred'
     });
   }
 });
