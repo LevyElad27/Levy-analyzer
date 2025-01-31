@@ -473,66 +473,52 @@ app.get('/api/stock/:ticker', async (req, res) => {
       return res.json(cached.data);
     }
 
-    // Try different exchanges in order
-    const exchanges = ['', '.NE', ':NYSE', ':NASDAQ'];
+    // Try different exchange suffixes
+    const suffixes = ['', '.N', '.NE', '.NYS', '.NY'];
     let stockData = null;
     let lastError = null;
 
-    for (const exchange of exchanges) {
+    for (const suffix of suffixes) {
       try {
-        const actualTicker = ticker + exchange;
-        // Try to get stock data
-        const quoteUrl = `${YAHOO_BASE_URL}/v8/finance/chart/${actualTicker}?interval=1d&range=1d`;
-        const quoteResponse = await axios.get(quoteUrl, {
+        const actualTicker = ticker + suffix;
+        // Get quote data directly
+        const quoteUrl = `${YAHOO_BASE_URL}/v7/finance/options/${actualTicker}`;
+        const response = await axios.get(quoteUrl, {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
           },
           timeout: 8000
         });
 
-        const chartData = quoteResponse.data?.chart?.result?.[0];
-        if (!chartData) continue;
-
-        const meta = chartData.meta;
-        const price = meta.regularMarketPrice;
-        const previousClose = meta.previousClose || meta.chartPreviousClose;
-        const change = price - previousClose;
-        const changePercent = (change / previousClose) * 100;
-
-        // Get additional details
-        const detailsUrl = `${YAHOO_BASE_URL}/v6/finance/quote?symbols=${actualTicker}`;
-        const detailsResponse = await axios.get(detailsUrl, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-          },
-          timeout: 8000
-        });
-
-        const quote = detailsResponse.data?.quoteResponse?.result?.[0];
+        const quote = response.data?.optionChain?.result?.[0]?.quote;
         if (!quote) continue;
 
         stockData = {
           ticker: ticker,
           name: quote.longName || quote.shortName || ticker,
-          price: parseFloat(price.toFixed(2)),
-          change: parseFloat(change.toFixed(2)),
-          changePercent: parseFloat(changePercent.toFixed(2)),
-          direction: change >= 0 ? 'up' : 'down',
+          price: parseFloat((quote.regularMarketPrice || 0).toFixed(2)),
+          change: parseFloat((quote.regularMarketChange || 0).toFixed(2)),
+          changePercent: parseFloat((quote.regularMarketChangePercent || 0).toFixed(2)),
+          direction: (quote.regularMarketChange || 0) >= 0 ? 'up' : 'down',
           marketCap: quote.marketCap ? formatMarketCap(quote.marketCap) : 'N/A',
           volume: quote.regularMarketVolume ? formatVolume(quote.regularMarketVolume) : 'N/A',
           peRatio: quote.forwardPE?.toFixed(2) || quote.trailingPE?.toFixed(2) || 'N/A',
           lastUpdate: new Date().toLocaleString()
         };
 
-        break; // Found valid data, exit loop
+        // If we got valid data, break the loop
+        if (stockData.price > 0) {
+          break;
+        }
       } catch (error) {
+        console.log(`Failed to fetch with suffix ${suffix}:`, error.message);
         lastError = error;
-        continue; // Try next exchange
+        continue;
       }
     }
 
-    if (!stockData) {
-      throw new Error(lastError?.message || 'Stock not found');
+    if (!stockData || stockData.price <= 0) {
+      throw new Error('Stock not found or invalid data received');
     }
 
     // Cache the result
