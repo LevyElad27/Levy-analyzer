@@ -473,52 +473,96 @@ app.get('/api/stock/:ticker', async (req, res) => {
       return res.json(cached.data);
     }
 
-    // Try different exchange suffixes
-    const suffixes = ['', '.N', '.NE', '.NYS', '.NY'];
-    let stockData = null;
-    let lastError = null;
-
-    for (const suffix of suffixes) {
-      try {
-        const actualTicker = ticker + suffix;
-        // Get quote data directly
-        const quoteUrl = `${YAHOO_BASE_URL}/v7/finance/options/${actualTicker}`;
-        const response = await axios.get(quoteUrl, {
+    // Try to get stock data with different methods
+    const methods = [
+      // Method 1: Direct quote
+      async () => {
+        const url = `${YAHOO_BASE_URL}/v6/finance/quote?symbols=${ticker}`;
+        return await axios.get(url, {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
           },
           timeout: 8000
         });
+      },
+      // Method 2: Chart data
+      async () => {
+        const url = `${YAHOO_BASE_URL}/v8/finance/chart/${ticker}`;
+        return await axios.get(url, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+          },
+          timeout: 8000
+        });
+      },
+      // Method 3: NYSE specific
+      async () => {
+        const url = `${YAHOO_BASE_URL}/v6/finance/quote?symbols=${ticker}.N`;
+        return await axios.get(url, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+          },
+          timeout: 8000
+        });
+      }
+    ];
 
-        const quote = response.data?.optionChain?.result?.[0]?.quote;
-        if (!quote) continue;
+    let stockData = null;
+    let lastError = null;
 
-        stockData = {
-          ticker: ticker,
-          name: quote.longName || quote.shortName || ticker,
-          price: parseFloat((quote.regularMarketPrice || 0).toFixed(2)),
-          change: parseFloat((quote.regularMarketChange || 0).toFixed(2)),
-          changePercent: parseFloat((quote.regularMarketChangePercent || 0).toFixed(2)),
-          direction: (quote.regularMarketChange || 0) >= 0 ? 'up' : 'down',
-          marketCap: quote.marketCap ? formatMarketCap(quote.marketCap) : 'N/A',
-          volume: quote.regularMarketVolume ? formatVolume(quote.regularMarketVolume) : 'N/A',
-          peRatio: quote.forwardPE?.toFixed(2) || quote.trailingPE?.toFixed(2) || 'N/A',
-          lastUpdate: new Date().toLocaleString()
-        };
-
-        // If we got valid data, break the loop
-        if (stockData.price > 0) {
-          break;
+    for (const method of methods) {
+      try {
+        const response = await method();
+        
+        // Try to extract data from quote endpoint
+        if (response.data?.quoteResponse?.result?.[0]) {
+          const quote = response.data.quoteResponse.result[0];
+          if (quote.regularMarketPrice > 0) {
+            stockData = {
+              ticker: ticker,
+              name: quote.longName || quote.shortName || ticker,
+              price: parseFloat((quote.regularMarketPrice || 0).toFixed(2)),
+              change: parseFloat((quote.regularMarketChange || 0).toFixed(2)),
+              changePercent: parseFloat((quote.regularMarketChangePercent || 0).toFixed(2)),
+              direction: (quote.regularMarketChange || 0) >= 0 ? 'up' : 'down',
+              marketCap: quote.marketCap ? formatMarketCap(quote.marketCap) : 'N/A',
+              volume: quote.regularMarketVolume ? formatVolume(quote.regularMarketVolume) : 'N/A',
+              peRatio: quote.forwardPE?.toFixed(2) || quote.trailingPE?.toFixed(2) || 'N/A',
+              lastUpdate: new Date().toLocaleString()
+            };
+            break;
+          }
+        }
+        
+        // Try to extract data from chart endpoint
+        if (response.data?.chart?.result?.[0]) {
+          const chartData = response.data.chart.result[0];
+          const meta = chartData.meta;
+          if (meta.regularMarketPrice > 0) {
+            stockData = {
+              ticker: ticker,
+              name: meta.instrumentName || ticker,
+              price: parseFloat((meta.regularMarketPrice || 0).toFixed(2)),
+              change: parseFloat((meta.regularMarketPrice - meta.previousClose || 0).toFixed(2)),
+              changePercent: parseFloat(((meta.regularMarketPrice - meta.previousClose) / meta.previousClose * 100 || 0).toFixed(2)),
+              direction: (meta.regularMarketPrice - meta.previousClose || 0) >= 0 ? 'up' : 'down',
+              marketCap: 'N/A', // Chart endpoint doesn't provide market cap
+              volume: meta.regularMarketVolume ? formatVolume(meta.regularMarketVolume) : 'N/A',
+              peRatio: 'N/A', // Chart endpoint doesn't provide PE ratio
+              lastUpdate: new Date().toLocaleString()
+            };
+            break;
+          }
         }
       } catch (error) {
-        console.log(`Failed to fetch with suffix ${suffix}:`, error.message);
+        console.log('Method failed:', error.message);
         lastError = error;
         continue;
       }
     }
 
-    if (!stockData || stockData.price <= 0) {
-      throw new Error('Stock not found or invalid data received');
+    if (!stockData) {
+      throw new Error(lastError?.message || 'Stock not found or invalid data received');
     }
 
     // Cache the result
@@ -530,7 +574,7 @@ app.get('/api/stock/:ticker', async (req, res) => {
     res.json(stockData);
   } catch (error) {
     console.error('Error fetching stock data:', error.message);
-    const errorMessage = error.message.includes('Stock not found')
+    const errorMessage = error.message.includes('Stock not found') || error.message.includes('Invalid')
       ? `Stock ${req.params.ticker} not found`
       : 'Failed to fetch stock data: ' + error.message;
     res.status(404).json({ 
