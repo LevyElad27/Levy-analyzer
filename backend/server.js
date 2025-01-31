@@ -465,46 +465,78 @@ const CACHE_DURATIONS = {
 // Get stock data with optimized caching and error handling
 app.get('/api/stock/:ticker', async (req, res) => {
   try {
-    const actualTicker = req.params.ticker.toUpperCase();
+    const ticker = req.params.ticker.toUpperCase();
     
     // Check cache first
-    const cached = cache.stockData.get(actualTicker);
+    const cached = cache.stockData.get(ticker);
     if (cached && Date.now() - cached.timestamp < CACHE_DURATIONS.STOCK) {
       return res.json(cached.data);
     }
 
-    // Try to get stock data with retry logic
-    const stockData = await retryWithBackoff(async () => {
-      // Get quote data
-      const quoteUrl = `${YAHOO_BASE_URL}/v6/finance/quote?symbols=${actualTicker}`;
-      const quoteResponse = await axios.get(quoteUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        },
-        timeout: 8000 // 8 second timeout
-      });
+    // Try different exchanges in order
+    const exchanges = ['', '.NE', ':NYSE', ':NASDAQ'];
+    let stockData = null;
+    let lastError = null;
 
-      const quote = quoteResponse.data?.quoteResponse?.result?.[0];
-      if (!quote) {
-        throw new Error('Stock not found');
+    for (const exchange of exchanges) {
+      try {
+        const actualTicker = ticker + exchange;
+        // Try to get stock data
+        const quoteUrl = `${YAHOO_BASE_URL}/v8/finance/chart/${actualTicker}?interval=1d&range=1d`;
+        const quoteResponse = await axios.get(quoteUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+          },
+          timeout: 8000
+        });
+
+        const chartData = quoteResponse.data?.chart?.result?.[0];
+        if (!chartData) continue;
+
+        const meta = chartData.meta;
+        const price = meta.regularMarketPrice;
+        const previousClose = meta.previousClose || meta.chartPreviousClose;
+        const change = price - previousClose;
+        const changePercent = (change / previousClose) * 100;
+
+        // Get additional details
+        const detailsUrl = `${YAHOO_BASE_URL}/v6/finance/quote?symbols=${actualTicker}`;
+        const detailsResponse = await axios.get(detailsUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+          },
+          timeout: 8000
+        });
+
+        const quote = detailsResponse.data?.quoteResponse?.result?.[0];
+        if (!quote) continue;
+
+        stockData = {
+          ticker: ticker,
+          name: quote.longName || quote.shortName || ticker,
+          price: parseFloat(price.toFixed(2)),
+          change: parseFloat(change.toFixed(2)),
+          changePercent: parseFloat(changePercent.toFixed(2)),
+          direction: change >= 0 ? 'up' : 'down',
+          marketCap: quote.marketCap ? formatMarketCap(quote.marketCap) : 'N/A',
+          volume: quote.regularMarketVolume ? formatVolume(quote.regularMarketVolume) : 'N/A',
+          peRatio: quote.forwardPE?.toFixed(2) || quote.trailingPE?.toFixed(2) || 'N/A',
+          lastUpdate: new Date().toLocaleString()
+        };
+
+        break; // Found valid data, exit loop
+      } catch (error) {
+        lastError = error;
+        continue; // Try next exchange
       }
+    }
 
-      return {
-        ticker: actualTicker,
-        name: quote.longName || quote.shortName || actualTicker,
-        price: parseFloat((quote.regularMarketPrice || 0).toFixed(2)),
-        change: parseFloat((quote.regularMarketChange || 0).toFixed(2)),
-        changePercent: parseFloat((quote.regularMarketChangePercent || 0).toFixed(2)),
-        direction: (quote.regularMarketChange || 0) >= 0 ? 'up' : 'down',
-        marketCap: quote.marketCap ? formatMarketCap(quote.marketCap) : 'N/A',
-        volume: quote.regularMarketVolume ? formatVolume(quote.regularMarketVolume) : 'N/A',
-        peRatio: quote.forwardPE?.toFixed(2) || quote.trailingPE?.toFixed(2) || 'N/A',
-        lastUpdate: new Date().toLocaleString()
-      };
-    });
+    if (!stockData) {
+      throw new Error(lastError?.message || 'Stock not found');
+    }
 
     // Cache the result
-    cache.stockData.set(actualTicker, {
+    cache.stockData.set(ticker, {
       data: stockData,
       timestamp: Date.now()
     });
@@ -512,10 +544,10 @@ app.get('/api/stock/:ticker', async (req, res) => {
     res.json(stockData);
   } catch (error) {
     console.error('Error fetching stock data:', error.message);
-    const errorMessage = error.message === 'Stock not found'
+    const errorMessage = error.message.includes('Stock not found')
       ? `Stock ${req.params.ticker} not found`
       : 'Failed to fetch stock data: ' + error.message;
-    res.status(error.message === 'Stock not found' ? 404 : 500).json({ 
+    res.status(404).json({ 
       error: errorMessage,
       ticker: req.params.ticker.toUpperCase()
     });
