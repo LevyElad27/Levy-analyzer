@@ -21,6 +21,7 @@ import {
 } from '@mui/icons-material';
 import { BASE_URL } from '../config';
 
+// @ts-ignore
 interface Filing {
   type: string;
   date: string;
