@@ -473,36 +473,35 @@ app.get('/api/stock/:ticker', async (req, res) => {
       return res.json(cached.data);
     }
 
-    // Get quote data first
-    const quoteUrl = `${YAHOO_BASE_URL}/v7/finance/quote?symbols=${actualTicker}`;
-    const quoteResponse = await axios.get(quoteUrl, {
-      timeout: 5000
+    // Try to get stock data with retry logic
+    const stockData = await retryWithBackoff(async () => {
+      // Get quote data
+      const quoteUrl = `${YAHOO_BASE_URL}/v6/finance/quote?symbols=${actualTicker}`;
+      const quoteResponse = await axios.get(quoteUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        },
+        timeout: 8000 // 8 second timeout
+      });
+
+      const quote = quoteResponse.data?.quoteResponse?.result?.[0];
+      if (!quote) {
+        throw new Error('Stock not found');
+      }
+
+      return {
+        ticker: actualTicker,
+        name: quote.longName || quote.shortName || actualTicker,
+        price: parseFloat((quote.regularMarketPrice || 0).toFixed(2)),
+        change: parseFloat((quote.regularMarketChange || 0).toFixed(2)),
+        changePercent: parseFloat((quote.regularMarketChangePercent || 0).toFixed(2)),
+        direction: (quote.regularMarketChange || 0) >= 0 ? 'up' : 'down',
+        marketCap: quote.marketCap ? formatMarketCap(quote.marketCap) : 'N/A',
+        volume: quote.regularMarketVolume ? formatVolume(quote.regularMarketVolume) : 'N/A',
+        peRatio: quote.forwardPE?.toFixed(2) || quote.trailingPE?.toFixed(2) || 'N/A',
+        lastUpdate: new Date().toLocaleString()
+      };
     });
-
-    if (!quoteResponse.data?.quoteResponse?.result?.[0]) {
-      throw new Error('Stock not found');
-    }
-
-    const quote = quoteResponse.data.quoteResponse.result[0];
-    const price = quote.regularMarketPrice;
-    const previousClose = quote.regularMarketPreviousClose;
-    const change = quote.regularMarketChange;
-    const changePercent = quote.regularMarketChangePercent;
-    const direction = change >= 0 ? 'up' : 'down';
-    const companyName = quote.longName || quote.shortName;
-
-    const stockData = {
-      ticker: actualTicker,
-      name: companyName || actualTicker,
-      price: parseFloat(price.toFixed(2)),
-      change: parseFloat(change.toFixed(2)),
-      changePercent: parseFloat(changePercent.toFixed(2)),
-      direction,
-      marketCap: quote.marketCap ? formatMarketCap(quote.marketCap) : 'N/A',
-      volume: quote.regularMarketVolume ? formatVolume(quote.regularMarketVolume) : 'N/A',
-      peRatio: quote.forwardPE?.toFixed(2) || quote.trailingPE?.toFixed(2) || 'N/A',
-      lastUpdate: new Date().toLocaleString()
-    };
 
     // Cache the result
     cache.stockData.set(actualTicker, {
@@ -516,7 +515,10 @@ app.get('/api/stock/:ticker', async (req, res) => {
     const errorMessage = error.message === 'Stock not found'
       ? `Stock ${req.params.ticker} not found`
       : 'Failed to fetch stock data: ' + error.message;
-    res.status(error.message === 'Stock not found' ? 404 : 500).json({ error: errorMessage });
+    res.status(error.message === 'Stock not found' ? 404 : 500).json({ 
+      error: errorMessage,
+      ticker: req.params.ticker.toUpperCase()
+    });
   }
 });
 
