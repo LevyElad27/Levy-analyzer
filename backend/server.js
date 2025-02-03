@@ -988,55 +988,125 @@ Write your analysis in Hebrew. Each section should be comprehensive and detailed
 app.get('/api/stock/search/:query', async (req, res) => {
   try {
     const query = req.params.query.toUpperCase();
+    console.log(`Searching for stock: ${query}`);
     
-    // Try to get search results from Google Finance
-    const searchUrl = `${GOOGLE_FINANCE_URL}/${query}`;
-    const response = await axios.get(searchUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Accept': 'text/html',
-        'Accept-Language': 'en-US,en;q=0.9'
-      },
-      timeout: 5000
-    });
+    // Try multiple search approaches
+    let results = [];
+    let errors = [];
 
-    const $ = require('cheerio').load(response.data);
-    const results = [];
+    // Approach 1: Direct Google Finance search
+    try {
+      const searchUrl = `${GOOGLE_FINANCE_URL}/search?q=${encodeURIComponent(query)}`;
+      console.log(`Trying direct search: ${searchUrl}`);
+      
+      const response = await axios.get(searchUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+          'Accept': 'text/html',
+          'Accept-Language': 'en-US,en;q=0.9'
+        },
+        timeout: 10000
+      });
 
-    // Find search results
-    $('div[role="listbox"] div[role="option"]').each((i, element) => {
-      const el = $(element);
-      const symbolElement = el.find('div.TwnWlf');
-      const nameElement = el.find('div.RwFyvf');
-      const exchangeElement = el.find('div.RwFyvf span.jBBUv');
+      const $ = require('cheerio').load(response.data);
+      
+      // Look for search results in different possible DOM structures
+      $('div[role="listbox"] div[role="option"], div.z4rs2b, div.yWOrNb').each((i, element) => {
+        const el = $(element);
+        
+        // Try different selectors for symbol and name
+        const symbolElement = el.find('div.TwnWlf, div.ZvmM7');
+        const nameElement = el.find('div.RwFyvf, div.Y4j7Nc');
+        const exchangeElement = el.find('div.RwFyvf span.jBBUv, span.QXDnM');
 
-      if (symbolElement.length && nameElement.length) {
-        const symbol = symbolElement.text().trim();
-        const name = nameElement.text().trim();
-        const exchange = exchangeElement.length ? exchangeElement.text().trim() : 'Unknown';
+        if (symbolElement.length && nameElement.length) {
+          const symbol = symbolElement.text().trim();
+          const name = nameElement.text().trim();
+          const exchange = exchangeElement.length ? exchangeElement.text().trim() : 'Unknown';
 
-        // Remove exchange from name if it exists
-        const cleanName = name.replace(exchange, '').trim();
+          // Clean up the data
+          const cleanName = name.replace(exchange, '').trim();
+          const cleanExchange = exchange.replace(/[()]/g, '').trim();
 
-        results.push({
-          symbol,
-          name: cleanName,
-          exchange: exchange.replace(/[()]/g, ''),
-          fullSymbol: exchange ? `${symbol}:${exchange.replace(/[()]/g, '')}` : symbol
-        });
+          // Only add if we haven't seen this symbol yet
+          if (!results.some(r => r.symbol === symbol)) {
+            results.push({
+              symbol,
+              name: cleanName,
+              exchange: cleanExchange,
+              fullSymbol: cleanExchange ? `${symbol}:${cleanExchange}` : symbol
+            });
+          }
+        }
+      });
+    } catch (error) {
+      console.error('Error in direct search:', error.message);
+      errors.push(`Direct search failed: ${error.message}`);
+    }
+
+    // Approach 2: Try searching with common exchange prefixes
+    if (results.length === 0) {
+      const exchanges = ['NYSE:', 'NASDAQ:', 'NYSEARCA:', 'NYSEAMERICAN:', 'OTCMKTS:', 'BATS:'];
+      
+      for (const exchange of exchanges) {
+        try {
+          const searchUrl = `${GOOGLE_FINANCE_URL}/${exchange}${query}`;
+          console.log(`Trying exchange search: ${searchUrl}`);
+          
+          const response = await axios.get(searchUrl, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+              'Accept': 'text/html',
+              'Accept-Language': 'en-US,en;q=0.9'
+            },
+            timeout: 5000
+          });
+
+          const $ = require('cheerio').load(response.data);
+          const nameElement = $('div.zzDege').first();
+          
+          if (nameElement.length) {
+            const name = nameElement.text().trim();
+            const exchangeCode = exchange.replace(':', '');
+            
+            results.push({
+              symbol: query,
+              name: name,
+              exchange: exchangeCode,
+              fullSymbol: `${query}:${exchangeCode}`
+            });
+            break; // Found a match, no need to try other exchanges
+          }
+        } catch (error) {
+          console.error(`Error searching with ${exchange}:`, error.message);
+          errors.push(`${exchange} search failed: ${error.message}`);
+          continue;
+        }
       }
-    });
+    }
 
-    res.json({
-      query,
-      results: results.slice(0, 10) // Limit to top 10 results
-    });
+    // If we found any results, return them
+    if (results.length > 0) {
+      console.log(`Found ${results.length} results for ${query}`);
+      res.json({
+        query,
+        results: results.slice(0, 10) // Limit to top 10 results
+      });
+    } else {
+      // If no results found, return a 404 with the error information
+      console.log(`No results found for ${query}. Errors:`, errors);
+      res.status(404).json({
+        error: 'No matching stocks found',
+        query,
+        details: errors.join('; ')
+      });
+    }
   } catch (error) {
     console.error('Error in stock search:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Failed to search stocks',
       query: req.params.query,
-      details: error.message
+      details: error.message || 'Unknown error occurred'
     });
   }
 });
