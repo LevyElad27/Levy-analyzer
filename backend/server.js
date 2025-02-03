@@ -467,89 +467,58 @@ app.get('/api/stock/:ticker', async (req, res) => {
       return res.json(cached.data);
     }
 
-    // Try different exchange formats and variations
-    const exchanges = [
-      '', // No prefix
-      'NYSE:', // NYSE direct
-      'NYSEARCA:', // NYSE Arca
-      'NYSEAMERICAN:', // NYSE American
-      'NYSE-MKT:', // NYSE Market
-      'NASDAQ:', // NASDAQ direct
-      'NASDAQ-CM:', // NASDAQ Capital Market
-      'NASDAQ-GM:', // NASDAQ Global Market
-      'NASDAQ-GS:', // NASDAQ Global Select
-      'OTCMKTS:', // OTC Markets
-      'OTCBB:', // Over-the-counter Bulletin Board
-      'PINK:', // Pink Sheets
-      'BATS:', // BATS Exchange
+    // Define exchange prefixes to try
+    const exchangePrefixes = [
+      'OTCMKTS:', // Try OTC Markets first for stocks like FMCC
+      'OTCBB:',   // OTC Bulletin Board
+      'PINK:',    // Pink Sheets
+      'NASDAQ:',  // NASDAQ
+      'NYSE:',    // NYSE
+      '',         // No prefix as fallback
     ];
 
     let stockData = null;
     let lastError = null;
 
-    for (const exchange of exchanges) {
+    // Try each exchange prefix
+    for (const prefix of exchangePrefixes) {
       try {
-        console.log(`Trying ${exchange}${ticker}`);
-        const response = await axios.get(`${GOOGLE_FINANCE_URL}/${exchange}${ticker}`, {
+        console.log(`Trying ${prefix}${ticker}`);
+        const response = await axios.get(`${GOOGLE_FINANCE_URL}/${prefix}${ticker}`, {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none',
-            'Sec-Fetch-User': '?1',
-            'Cache-Control': 'max-age=0'
+            'Accept': 'text/html',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Cache-Control': 'no-cache'
           },
-          timeout: 8000,
-          validateStatus: function (status) {
-            return status < 500; // Accept any status less than 500
-          }
+          timeout: 10000
         });
-
-        if (response.status === 404) {
-          continue;
-        }
 
         const $ = require('cheerio').load(response.data);
         
-        // Find the main price element with multiple possible selectors
-        const priceSelectors = ['.YMlKec.fxKbKc', '.AHmHk', '.IsqQVc.NprOob'];
-        let priceText;
-        for (const selector of priceSelectors) {
-          priceText = $(selector).first().text().trim();
-          if (priceText) break;
+        // Check if we got a valid page (look for price element)
+        const priceElement = $('.YMlKec.fxKbKc').first();
+        if (!priceElement.length) {
+          continue;
         }
-        
-        if (!priceText) continue;
-        
+
+        const priceText = priceElement.text().trim();
         const price = parseFloat(priceText.replace(/[^\d.-]/g, ''));
-        if (isNaN(price)) continue;
-
-        // Find the company name with multiple possible selectors
-        const nameSelectors = ['div[class="zzDege"]', 'h1[class="NydbP"]'];
-        let companyName;
-        for (const selector of nameSelectors) {
-          companyName = $(selector).first().text().trim();
-          if (companyName) break;
+        if (isNaN(price)) {
+          continue;
         }
 
-        // Try different selectors for price changes
-        const changeSelectors = ['.P2Luy', '.JwB6zf', '.qFiidc'];
-        let changeText;
-        for (const selector of changeSelectors) {
-          changeText = $(selector).first().text().trim();
-          if (changeText) break;
-        }
+        // Get company name
+        const companyName = $('div[class="zzDege"]').first().text().trim();
 
+        // Get price change
+        const changeElement = $('.JwB6zf').first();
         let change = 0;
         let changePercent = 0;
         let direction = 'up';
 
-        if (changeText) {
+        if (changeElement.length) {
+          const changeText = changeElement.text().trim();
           const matches = changeText.match(/([-+]?\d+\.?\d*)\s*\(([-+]?\d+\.?\d*)%\)/);
           if (matches) {
             change = parseFloat(matches[1]);
@@ -558,24 +527,25 @@ app.get('/api/stock/:ticker', async (req, res) => {
           }
         }
 
-        // Extract market data from the table with multiple possible selectors
-        const marketData = {};
-        const dataSelectors = ['.gyFHrc', '.P6K39c'];
-        for (const selector of dataSelectors) {
-          $(selector).each((i, elem) => {
-            const label = $(elem).find('.mfs7Fc').text().trim();
-            const value = $(elem).find('.P6K39c').text().trim();
-            
-            if (label.includes('Market cap')) {
-              marketData.marketCap = value;
-            } else if (label.includes('P/E ratio')) {
-              marketData.peRatio = value;
-            } else if (label.includes('Volume')) {
-              marketData.volume = value;
-            }
-          });
-          if (Object.keys(marketData).length > 0) break;
-        }
+        // Get market data
+        const marketData = {
+          marketCap: 'N/A',
+          volume: 'N/A',
+          peRatio: 'N/A'
+        };
+
+        $('.gyFHrc').each((i, elem) => {
+          const label = $(elem).find('.mfs7Fc').text().trim();
+          const value = $(elem).find('.P6K39c').text().trim();
+          
+          if (label.includes('Market cap')) {
+            marketData.marketCap = value;
+          } else if (label.includes('P/E ratio')) {
+            marketData.peRatio = value;
+          } else if (label.includes('Volume')) {
+            marketData.volume = value;
+          }
+        });
 
         stockData = {
           ticker,
@@ -584,26 +554,26 @@ app.get('/api/stock/:ticker', async (req, res) => {
           change,
           changePercent,
           direction,
-          marketCap: marketData.marketCap || 'N/A',
-          volume: marketData.volume || 'N/A',
-          peRatio: marketData.peRatio || 'N/A',
-          lastUpdate: new Date().toLocaleString(),
-          exchange: exchange.replace(':', '') || 'Unknown'
+          marketCap: marketData.marketCap,
+          volume: marketData.volume,
+          peRatio: marketData.peRatio,
+          exchange: prefix.replace(':', '') || 'Unknown',
+          lastUpdate: new Date().toLocaleString()
         };
 
         break;
       } catch (error) {
         lastError = error;
-        console.error(`Failed to fetch with ${exchange}:`, error.message);
+        console.error(`Failed to fetch with ${prefix}:`, error.message);
         continue;
       }
     }
 
     if (!stockData) {
-      throw new Error(lastError?.message || 'Stock not found on any exchange');
+      throw new Error(`Unable to find stock data for ${ticker}`);
     }
 
-    // Cache the result
+    // Cache the successful result
     cache.stockData.set(ticker, {
       data: stockData,
       timestamp: Date.now()
@@ -815,7 +785,7 @@ When analyzing filings:
 - אסטרטגיה ומיקוד עסקי
 - השקעות ורכישות
 - שינויים בהנהלה
-- התפתחויות בשוק
+- התפתחות בשוק
 
 4. סיכונים והזדמנויות
 - סיכונים חדשים או מתפתחים
