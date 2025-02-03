@@ -473,14 +473,21 @@ app.get('/api/stock/:ticker', async (req, res) => {
       return res.json(cached.data);
     }
 
-    // Try different exchanges in order
-    const exchanges = ['NASDAQ', 'NYSE', 'NYSEARCA', 'BATS'];
-    let stockData = null;
-    let error = null;
+    // Try different exchange formats
+    const exchanges = [
+      '', // No prefix
+      'OTCMKTS:', // OTC Markets
+      'OTCBB:', // Over-the-counter Bulletin Board
+      'NASDAQ:', 
+      'NYSE:',
+      'NYSEARCA:',
+      'NYSEAMERICAN:'
+    ];
 
+    let stockData = null;
     for (const exchange of exchanges) {
       try {
-        const response = await axios.get(`${GOOGLE_FINANCE_URL}/${ticker}:${exchange}`, {
+        const response = await axios.get(`${GOOGLE_FINANCE_URL}/${exchange}${ticker}`, {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
           },
@@ -532,7 +539,7 @@ app.get('/api/stock/:ticker', async (req, res) => {
         });
 
         stockData = {
-          ticker: ticker,
+          ticker,
           name: companyName || ticker,
           price,
           change,
@@ -545,14 +552,14 @@ app.get('/api/stock/:ticker', async (req, res) => {
         };
 
         break;
-      } catch (e) {
-        error = e;
+      } catch (error) {
+        console.error(`Failed to fetch with ${exchange}:`, error.message);
         continue;
       }
     }
 
     if (!stockData) {
-      throw error || new Error('Failed to fetch stock data from any exchange');
+      throw new Error('Stock not found on any exchange');
     }
 
     // Cache the result
@@ -571,7 +578,7 @@ app.get('/api/stock/:ticker', async (req, res) => {
   }
 });
 
-// Get stock news by scraping Google News
+// Get stock news from Google News
 app.get('/api/stock/:ticker/news', async (req, res) => {
   try {
     const { ticker } = req.params;
@@ -583,7 +590,7 @@ app.get('/api/stock/:ticker/news', async (req, res) => {
       return res.json(cached.data);
     }
 
-    // Scrape Google News search results
+    // Search Google News for the stock
     const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(ticker + ' stock')}&tbm=nws`;
     const response = await axios.get(searchUrl, {
       headers: {
@@ -597,21 +604,21 @@ app.get('/api/stock/:ticker/news', async (req, res) => {
 
     // Find news articles
     $('.g').each((i, element) => {
-      if (news.length >= 5) return false; // Only get first 5 news items
+      if (news.length >= 5) return false;
 
       const article = $(element);
       const titleElement = article.find('h3');
-      const linkElement = article.find('a');
-      const snippetElement = article.find('.VwiC3b');
+      const linkElement = article.find('a').first();
       const sourceElement = article.find('.CEMjEf');
       const timeElement = article.find('.LfVVr');
+      const snippetElement = article.find('.VwiC3b');
 
       if (titleElement.length && linkElement.length) {
         const title = titleElement.text().trim();
         const link = linkElement.attr('href');
-        const source = sourceElement.text().trim() || 'News';
-        const description = snippetElement.text().trim() || title;
+        const source = sourceElement.text().trim() || 'News Source';
         const pubDate = timeElement.text().trim() || new Date().toLocaleString();
+        const description = snippetElement.text().trim() || title;
 
         news.push({
           title,
@@ -839,16 +846,10 @@ app.post('/api/translate', async (req, res) => {
       });
     }
 
-    const translation = await retryWithBackoff(async () => {
-      try {
-        const result = await translate(text, { to: 'iw' });
-        if (!result) throw new Error('Empty translation result');
-        return result;
-      } catch (error) {
-        console.error('Translation attempt failed:', error);
-        throw error;
-      }
-    });
+    const translation = await translate(text, { to: 'iw' });
+    if (!translation) {
+      throw new Error('Empty translation result');
+    }
     
     res.json({
       originalText: text,
@@ -870,10 +871,6 @@ app.post('/api/translate', async (req, res) => {
       statusCode = 429;
       errorMessage = 'Too many translation requests. Please try again later';
       errorCode = 'RATE_LIMIT';
-    } else if (error.message.includes('not supported')) {
-      statusCode = 400;
-      errorMessage = 'Translation to this language is not supported';
-      errorCode = 'UNSUPPORTED_LANGUAGE';
     }
 
     res.status(statusCode).json({ 
@@ -984,10 +981,14 @@ Write your analysis in Hebrew. Each section should be comprehensive and detailed
   }
 });
 
-// Add error handling for uncaught exceptions
+// Add health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok' });
+});
+
+// Error handling for uncaught exceptions
 process.on('uncaughtException', (error) => {
   console.error('Uncaught Exception:', error);
-  // Give time for logs to be written before exiting
   setTimeout(() => process.exit(1), 1000);
 });
 
@@ -1002,11 +1003,4 @@ app.listen(PORT, '0.0.0.0', (error) => {
     return;
   }
   console.log(`Server is running on port ${PORT}`);
-  console.log('Environment:', process.env.NODE_ENV);
-  console.log('Memory usage:', process.memoryUsage());
-});
-
-// Add health check endpoint
-app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'ok' });
 });
