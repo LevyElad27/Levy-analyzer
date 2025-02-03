@@ -18,7 +18,12 @@ import {
   IconButton,
   CircularProgress,
   Link,
-  Collapse
+  Collapse,
+  Autocomplete,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions
 } from '@mui/material';
 import {
   Delete as DeleteIcon,
@@ -52,6 +57,13 @@ interface Stock {
   news?: NewsItem[];
 }
 
+interface StockSearchResult {
+  symbol: string;
+  name: string;
+  exchange: string;
+  fullSymbol: string;
+}
+
 const PortfolioPage: React.FC = () => {
   const {
     stocks,
@@ -62,6 +74,10 @@ const PortfolioPage: React.FC = () => {
   } = usePortfolio();
 
   const [newTicker, setNewTicker] = useState('');
+  const [searchResults, setSearchResults] = useState<StockSearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [selectedStock, setSelectedStock] = useState<StockSearchResult | null>(null);
   const [expandedNews, setExpandedNews] = useState<string[]>([]);
   const [translatedTitles, setTranslatedTitles] = useState<{ [key: string]: string }>({});
   const [translating, setTranslating] = useState<{ [key: string]: boolean }>({});
@@ -127,11 +143,40 @@ const PortfolioPage: React.FC = () => {
     }
   };
 
-  const handleAddStock = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newTicker) return;
-    await addStock(newTicker);
+  const handleSearch = async (query: string) => {
+    setNewTicker(query);
+    if (!query) {
+      setSearchResults([]);
+      return;
+    }
+
+    try {
+      setSearching(true);
+      setSearchError(null);
+      const response = await fetch(`${BASE_URL}/stock/search/${query}`);
+      const data = await response.json();
+      
+      if (response.ok) {
+        setSearchResults(data.results);
+      } else {
+        setSearchError(data.error);
+        setSearchResults([]);
+      }
+    } catch (error) {
+      setSearchError('Failed to search stocks');
+      setSearchResults([]);
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const handleStockSelect = async (stock: StockSearchResult | null) => {
+    if (!stock) return;
+    setSelectedStock(stock);
+    await addStock(stock.fullSymbol);
     setNewTicker('');
+    setSearchResults([]);
+    setSelectedStock(null);
   };
 
   return (
@@ -183,56 +228,49 @@ const PortfolioPage: React.FC = () => {
               maxWidth: '600px'
             }}
           >
-            <Box 
-              component="form" 
-              onSubmit={handleAddStock}
-              sx={{ 
-                display: 'flex', 
-                gap: 2,
-                flexDirection: isMobile ? 'column' : 'row',
-                width: '100%',
-                justifyContent: 'center'
-              }}
-            >
-              <TextField
-                fullWidth={isMobile}
-                label="Add Stock to Portfolio"
-                value={newTicker}
-                onChange={(e) => setNewTicker(e.target.value.toUpperCase())}
-                placeholder="Enter ticker symbol"
-                variant="outlined"
-                disabled={loading}
-                size="small"
-                sx={{ 
-                  flexGrow: 1,
-                  maxWidth: isMobile ? '100%' : '400px'
-                }}
+            <Box sx={{ width: '100%' }}>
+              <Autocomplete
+                fullWidth
+                options={searchResults}
+                getOptionLabel={(option) => `${option.symbol} - ${option.name} (${option.exchange})`}
+                loading={searching}
+                onInputChange={(_, value) => handleSearch(value)}
+                onChange={(_, value) => handleStockSelect(value)}
+                value={selectedStock}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Search Stocks"
+                    placeholder="Enter company name or symbol"
+                    variant="outlined"
+                    size="small"
+                    error={!!searchError}
+                    helperText={searchError}
+                    InputProps={{
+                      ...params.InputProps,
+                      endAdornment: (
+                        <>
+                          {searching ? <CircularProgress color="inherit" size={20} /> : null}
+                          {params.InputProps.endAdornment}
+                        </>
+                      ),
+                    }}
+                  />
+                )}
+                renderOption={(props, option) => (
+                  <li {...props}>
+                    <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                      <Typography variant="body1" component="span">
+                        {option.symbol} - {option.name}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {option.exchange}
+                      </Typography>
+                    </Box>
+                  </li>
+                )}
               />
-              <Button
-                type="submit"
-                variant="contained"
-                disabled={!newTicker || loading}
-                startIcon={<AddIcon />}
-                sx={{ 
-                  minWidth: isMobile ? '100%' : '120px'
-                }}
-              >
-                Add Stock
-              </Button>
             </Box>
-
-            {error && (
-              <Typography 
-                color="error" 
-                sx={{ 
-                  mt: 2,
-                  fontSize: '0.875rem',
-                  textAlign: 'center'
-                }}
-              >
-                {error}
-              </Typography>
-            )}
           </Paper>
 
           <Box sx={{ 

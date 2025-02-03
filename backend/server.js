@@ -766,7 +766,7 @@ When analyzing filings:
 - אסטרטגיה ומיקוד עסקי
 - השקעות ורכישות
 - שינויים בהנהלה
-- התפתחויות בשוק
+- התפתחות בשוק
 
 4. סיכונים והזדמנויות
 - סיכונים חדשים או מתפתחים
@@ -980,6 +980,63 @@ Write your analysis in Hebrew. Each section should be comprehensive and detailed
     res.status(500).json({ 
       error: 'Failed to analyze company',
       details: error.message 
+    });
+  }
+});
+
+// Search stocks endpoint
+app.get('/api/stock/search/:query', async (req, res) => {
+  try {
+    const query = req.params.query.toUpperCase();
+    
+    // Try to get search results from Google Finance
+    const searchUrl = `${GOOGLE_FINANCE_URL}/${query}`;
+    const response = await axios.get(searchUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept': 'text/html',
+        'Accept-Language': 'en-US,en;q=0.9'
+      },
+      timeout: 5000
+    });
+
+    const $ = require('cheerio').load(response.data);
+    const results = [];
+
+    // Find search results
+    $('div[role="listbox"] div[role="option"]').each((i, element) => {
+      const el = $(element);
+      const symbolElement = el.find('div.TwnWlf');
+      const nameElement = el.find('div.RwFyvf');
+      const exchangeElement = el.find('div.RwFyvf span.jBBUv');
+
+      if (symbolElement.length && nameElement.length) {
+        const symbol = symbolElement.text().trim();
+        const name = nameElement.text().trim();
+        const exchange = exchangeElement.length ? exchangeElement.text().trim() : 'Unknown';
+
+        // Remove exchange from name if it exists
+        const cleanName = name.replace(exchange, '').trim();
+
+        results.push({
+          symbol,
+          name: cleanName,
+          exchange: exchange.replace(/[()]/g, ''),
+          fullSymbol: exchange ? `${symbol}:${exchange.replace(/[()]/g, '')}` : symbol
+        });
+      }
+    });
+
+    res.json({
+      query,
+      results: results.slice(0, 10) // Limit to top 10 results
+    });
+  } catch (error) {
+    console.error('Error in stock search:', error);
+    res.status(500).json({ 
+      error: 'Failed to search stocks',
+      query: req.params.query,
+      details: error.message
     });
   }
 });
