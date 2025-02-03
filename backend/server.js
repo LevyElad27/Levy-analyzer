@@ -467,42 +467,83 @@ app.get('/api/stock/:ticker', async (req, res) => {
       return res.json(cached.data);
     }
 
-    // Try different exchange formats
+    // Try different exchange formats and variations
     const exchanges = [
       '', // No prefix
+      'NYSE:', // NYSE direct
+      'NYSEARCA:', // NYSE Arca
+      'NYSEAMERICAN:', // NYSE American
+      'NYSE-MKT:', // NYSE Market
+      'NASDAQ:', // NASDAQ direct
+      'NASDAQ-CM:', // NASDAQ Capital Market
+      'NASDAQ-GM:', // NASDAQ Global Market
+      'NASDAQ-GS:', // NASDAQ Global Select
       'OTCMKTS:', // OTC Markets
       'OTCBB:', // Over-the-counter Bulletin Board
-      'NASDAQ:', 
-      'NYSE:',
-      'NYSEARCA:',
-      'NYSEAMERICAN:'
+      'PINK:', // Pink Sheets
+      'BATS:', // BATS Exchange
     ];
 
     let stockData = null;
+    let lastError = null;
+
     for (const exchange of exchanges) {
       try {
+        console.log(`Trying ${exchange}${ticker}`);
         const response = await axios.get(`${GOOGLE_FINANCE_URL}/${exchange}${ticker}`, {
           headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Cache-Control': 'max-age=0'
           },
-          timeout: 5000
+          timeout: 8000,
+          validateStatus: function (status) {
+            return status < 500; // Accept any status less than 500
+          }
         });
+
+        if (response.status === 404) {
+          continue;
+        }
 
         const $ = require('cheerio').load(response.data);
         
-        // Find the main price element
-        const priceText = $('.YMlKec.fxKbKc').first().text().trim();
+        // Find the main price element with multiple possible selectors
+        const priceSelectors = ['.YMlKec.fxKbKc', '.AHmHk', '.IsqQVc.NprOob'];
+        let priceText;
+        for (const selector of priceSelectors) {
+          priceText = $(selector).first().text().trim();
+          if (priceText) break;
+        }
+        
         if (!priceText) continue;
         
         const price = parseFloat(priceText.replace(/[^\d.-]/g, ''));
         if (isNaN(price)) continue;
 
-        // Find the company name
-        const companyName = $('div[class="zzDege"]').first().text().trim();
+        // Find the company name with multiple possible selectors
+        const nameSelectors = ['div[class="zzDege"]', 'h1[class="NydbP"]'];
+        let companyName;
+        for (const selector of nameSelectors) {
+          companyName = $(selector).first().text().trim();
+          if (companyName) break;
+        }
 
         // Try different selectors for price changes
-        const priceChangeElement = $('.P2Luy').first();
-        const changeText = priceChangeElement.text().trim();
+        const changeSelectors = ['.P2Luy', '.JwB6zf', '.qFiidc'];
+        let changeText;
+        for (const selector of changeSelectors) {
+          changeText = $(selector).first().text().trim();
+          if (changeText) break;
+        }
 
         let change = 0;
         let changePercent = 0;
@@ -517,20 +558,24 @@ app.get('/api/stock/:ticker', async (req, res) => {
           }
         }
 
-        // Extract market data from the table
+        // Extract market data from the table with multiple possible selectors
         const marketData = {};
-        $('.gyFHrc').each((i, elem) => {
-          const label = $(elem).find('.mfs7Fc').text().trim();
-          const value = $(elem).find('.P6K39c').text().trim();
-          
-          if (label.includes('Market cap')) {
-            marketData.marketCap = value;
-          } else if (label.includes('P/E ratio')) {
-            marketData.peRatio = value;
-          } else if (label.includes('Volume')) {
-            marketData.volume = value;
-          }
-        });
+        const dataSelectors = ['.gyFHrc', '.P6K39c'];
+        for (const selector of dataSelectors) {
+          $(selector).each((i, elem) => {
+            const label = $(elem).find('.mfs7Fc').text().trim();
+            const value = $(elem).find('.P6K39c').text().trim();
+            
+            if (label.includes('Market cap')) {
+              marketData.marketCap = value;
+            } else if (label.includes('P/E ratio')) {
+              marketData.peRatio = value;
+            } else if (label.includes('Volume')) {
+              marketData.volume = value;
+            }
+          });
+          if (Object.keys(marketData).length > 0) break;
+        }
 
         stockData = {
           ticker,
@@ -542,18 +587,20 @@ app.get('/api/stock/:ticker', async (req, res) => {
           marketCap: marketData.marketCap || 'N/A',
           volume: marketData.volume || 'N/A',
           peRatio: marketData.peRatio || 'N/A',
-          lastUpdate: new Date().toLocaleString()
+          lastUpdate: new Date().toLocaleString(),
+          exchange: exchange.replace(':', '') || 'Unknown'
         };
 
         break;
       } catch (error) {
+        lastError = error;
         console.error(`Failed to fetch with ${exchange}:`, error.message);
         continue;
       }
     }
 
     if (!stockData) {
-      throw new Error('Stock not found on any exchange');
+      throw new Error(lastError?.message || 'Stock not found on any exchange');
     }
 
     // Cache the result
@@ -567,7 +614,8 @@ app.get('/api/stock/:ticker', async (req, res) => {
     console.error('Error fetching stock data:', error.message);
     res.status(404).json({ 
       error: `Stock ${req.params.ticker} not found`,
-      ticker: req.params.ticker.toUpperCase()
+      ticker: req.params.ticker.toUpperCase(),
+      details: error.message
     });
   }
 });
