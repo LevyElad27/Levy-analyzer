@@ -984,61 +984,89 @@ Write your analysis in Hebrew. Each section should be comprehensive and detailed
   }
 });
 
+// Helper function for retrying failed requests
+async function retryRequest(operation, maxRetries = 3, delay = 1000) {
+  let lastError;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (i < maxRetries - 1) {
+        await new Promise(resolve => setTimeout(resolve, delay * (i + 1)));
+      }
+    }
+  }
+  throw lastError;
+}
+
 // Search stocks endpoint
 app.get('/api/stock/search/:query', async (req, res) => {
   try {
     const query = req.params.query.toUpperCase();
     console.log(`Searching for stock: ${query}`);
     
-    // Try multiple search approaches
     let results = [];
     let errors = [];
 
-    // Approach 1: Direct Google Finance search
+    // Approach 1: Direct Google Finance search with retry
     try {
-      const searchUrl = `${GOOGLE_FINANCE_URL}/search?q=${encodeURIComponent(query)}`;
-      console.log(`Trying direct search: ${searchUrl}`);
-      
-      const response = await axios.get(searchUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-          'Accept': 'text/html',
-          'Accept-Language': 'en-US,en;q=0.9'
-        },
-        timeout: 10000
-      });
-
-      const $ = require('cheerio').load(response.data);
-      
-      // Look for search results in different possible DOM structures
-      $('div[role="listbox"] div[role="option"], div.z4rs2b, div.yWOrNb').each((i, element) => {
-        const el = $(element);
+      const searchOperation = async () => {
+        const searchUrl = `https://www.google.com/finance/search?q=${encodeURIComponent(query)}`;
+        console.log(`Trying direct search: ${searchUrl}`);
         
-        // Try different selectors for symbol and name
-        const symbolElement = el.find('div.TwnWlf, div.ZvmM7');
-        const nameElement = el.find('div.RwFyvf, div.Y4j7Nc');
-        const exchangeElement = el.find('div.RwFyvf span.jBBUv, span.QXDnM');
+        const response = await axios.get(searchUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1'
+          },
+          timeout: 8000,
+          maxRedirects: 5,
+          validateStatus: (status) => status < 500
+        });
 
-        if (symbolElement.length && nameElement.length) {
-          const symbol = symbolElement.text().trim();
-          const name = nameElement.text().trim();
-          const exchange = exchangeElement.length ? exchangeElement.text().trim() : 'Unknown';
+        const $ = require('cheerio').load(response.data);
+        
+        // Enhanced selectors for different Google Finance layouts
+        $('div[role="listbox"] div[role="option"], div.z4rs2b, div.yWOrNb, div.SxcTic').each((i, element) => {
+          const el = $(element);
+          
+          // Try multiple selector combinations
+          const symbolElement = el.find('div.TwnWlf, div.ZvmM7, div.tYlb7d');
+          const nameElement = el.find('div.RwFyvf, div.Y4j7Nc, div.qNqwpc');
+          const exchangeElement = el.find('div.RwFyvf span.jBBUv, span.QXDnM, div.q5UyHd');
 
-          // Clean up the data
-          const cleanName = name.replace(exchange, '').trim();
-          const cleanExchange = exchange.replace(/[()]/g, '').trim();
+          if (symbolElement.length && nameElement.length) {
+            const symbol = symbolElement.text().trim();
+            const name = nameElement.text().trim();
+            const exchange = exchangeElement.length ? exchangeElement.text().trim() : 'Unknown';
 
-          // Only add if we haven't seen this symbol yet
-          if (!results.some(r => r.symbol === symbol)) {
-            results.push({
-              symbol,
-              name: cleanName,
-              exchange: cleanExchange,
-              fullSymbol: cleanExchange ? `${symbol}:${cleanExchange}` : symbol
-            });
+            const cleanName = name.replace(exchange, '').trim();
+            const cleanExchange = exchange.replace(/[()]/g, '').trim();
+
+            if (!results.some(r => r.symbol === symbol)) {
+              results.push({
+                symbol,
+                name: cleanName,
+                exchange: cleanExchange,
+                fullSymbol: cleanExchange ? `${symbol}:${cleanExchange}` : symbol
+              });
+            }
           }
-        }
-      });
+        });
+
+        return results;
+      };
+
+      results = await retryRequest(searchOperation);
     } catch (error) {
       console.error('Error in direct search:', error.message);
       errors.push(`Direct search failed: ${error.message}`);
@@ -1046,37 +1074,49 @@ app.get('/api/stock/search/:query', async (req, res) => {
 
     // Approach 2: Try searching with common exchange prefixes
     if (results.length === 0) {
-      const exchanges = ['NYSE:', 'NASDAQ:', 'NYSEARCA:', 'NYSEAMERICAN:', 'OTCMKTS:', 'BATS:'];
+      const exchanges = ['NYSE:', 'NASDAQ:', 'NYSEARCA:', 'NYSEAMERICAN:', 'OTCMKTS:', 'BATS:', 'OTCBB:', 'PINK:'];
       
       for (const exchange of exchanges) {
         try {
-          const searchUrl = `${GOOGLE_FINANCE_URL}/${exchange}${query}`;
-          console.log(`Trying exchange search: ${searchUrl}`);
-          
-          const response = await axios.get(searchUrl, {
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-              'Accept': 'text/html',
-              'Accept-Language': 'en-US,en;q=0.9'
-            },
-            timeout: 5000
-          });
-
-          const $ = require('cheerio').load(response.data);
-          const nameElement = $('div.zzDege').first();
-          
-          if (nameElement.length) {
-            const name = nameElement.text().trim();
-            const exchangeCode = exchange.replace(':', '');
+          const searchOperation = async () => {
+            const searchUrl = `https://www.google.com/finance/quote/${exchange}${query}`;
+            console.log(`Trying exchange search: ${searchUrl}`);
             
-            results.push({
-              symbol: query,
-              name: name,
-              exchange: exchangeCode,
-              fullSymbol: `${query}:${exchangeCode}`
+            const response = await axios.get(searchUrl, {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Connection': 'keep-alive',
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache'
+              },
+              timeout: 5000,
+              maxRedirects: 5,
+              validateStatus: (status) => status < 500
             });
-            break; // Found a match, no need to try other exchanges
-          }
+
+            const $ = require('cheerio').load(response.data);
+            const nameElement = $('div.zzDege, div.qrShPb').first();
+            
+            if (nameElement.length) {
+              const name = nameElement.text().trim();
+              const exchangeCode = exchange.replace(':', '');
+              
+              results.push({
+                symbol: query,
+                name: name,
+                exchange: exchangeCode,
+                fullSymbol: `${query}:${exchangeCode}`
+              });
+              return true;
+            }
+            return false;
+          };
+
+          const found = await retryRequest(searchOperation);
+          if (found) break;
         } catch (error) {
           console.error(`Error searching with ${exchange}:`, error.message);
           errors.push(`${exchange} search failed: ${error.message}`);
