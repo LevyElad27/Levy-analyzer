@@ -473,41 +473,58 @@ app.get('/api/stock/:ticker', async (req, res) => {
       return res.json(cached.data);
     }
 
-    // Try different exchanges in order
-    const exchanges = ['NASDAQ', 'NYSE', 'NYSEARCA', 'BATS'];
-    let stockData = null;
-    let error = null;
+    // Define exchange prefixes to try
+    const exchangePrefixes = [
+      'OTCMKTS:', // Try OTC Markets first for stocks like FMCC
+      'OTCBB:',   // OTC Bulletin Board
+      'PINK:',    // Pink Sheets
+      'NASDAQ:',  // NASDAQ
+      'NYSE:',    // NYSE
+      '',         // No prefix as fallback
+    ];
 
-    for (const exchange of exchanges) {
+    let stockData = null;
+    let lastError = null;
+
+    // Try each exchange prefix
+    for (const prefix of exchangePrefixes) {
       try {
-        const response = await axios.get(`${GOOGLE_FINANCE_URL}/${ticker}:${exchange}`, {
+        console.log(`Trying ${prefix}${ticker}`);
+        const response = await axios.get(`${GOOGLE_FINANCE_URL}/${prefix}${ticker}`, {
           headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'text/html',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Cache-Control': 'no-cache'
           },
-          timeout: 5000
+          timeout: 10000
         });
 
         const $ = require('cheerio').load(response.data);
         
-        // Find the main price element
-        const priceText = $('.YMlKec.fxKbKc').first().text().trim();
-        if (!priceText) continue;
-        
-        const price = parseFloat(priceText.replace(/[^\d.-]/g, ''));
-        if (isNaN(price)) continue;
+        // Check if we got a valid page (look for price element)
+        const priceElement = $('.YMlKec.fxKbKc').first();
+        if (!priceElement.length) {
+          continue;
+        }
 
-        // Find the company name
+        const priceText = priceElement.text().trim();
+        const price = parseFloat(priceText.replace(/[^\d.-]/g, ''));
+        if (isNaN(price)) {
+          continue;
+        }
+
+        // Get company name
         const companyName = $('div[class="zzDege"]').first().text().trim();
 
-        // Try different selectors for price changes
-        const priceChangeElement = $('.P2Luy').first();
-        const changeText = priceChangeElement.text().trim();
-
+        // Get price change
+        const changeElement = $('.JwB6zf').first();
         let change = 0;
         let changePercent = 0;
         let direction = 'up';
 
-        if (changeText) {
+        if (changeElement.length) {
+          const changeText = changeElement.text().trim();
           const matches = changeText.match(/([-+]?\d+\.?\d*)\s*\(([-+]?\d+\.?\d*)%\)/);
           if (matches) {
             change = parseFloat(matches[1]);
@@ -516,8 +533,13 @@ app.get('/api/stock/:ticker', async (req, res) => {
           }
         }
 
-        // Extract market data from the table
-        const marketData = {};
+        // Get market data
+        const marketData = {
+          marketCap: 'N/A',
+          volume: 'N/A',
+          peRatio: 'N/A'
+        };
+
         $('.gyFHrc').each((i, elem) => {
           const label = $(elem).find('.mfs7Fc').text().trim();
           const value = $(elem).find('.P6K39c').text().trim();
@@ -532,30 +554,32 @@ app.get('/api/stock/:ticker', async (req, res) => {
         });
 
         stockData = {
-          ticker: ticker,
+          ticker,
           name: companyName || ticker,
           price,
           change,
           changePercent,
           direction,
-          marketCap: marketData.marketCap || 'N/A',
-          volume: marketData.volume || 'N/A',
-          peRatio: marketData.peRatio || 'N/A',
+          marketCap: marketData.marketCap,
+          volume: marketData.volume,
+          peRatio: marketData.peRatio,
+          exchange: prefix.replace(':', '') || 'Unknown',
           lastUpdate: new Date().toLocaleString()
         };
 
         break;
-      } catch (e) {
-        error = e;
+      } catch (error) {
+        lastError = error;
+        console.error(`Failed to fetch with ${prefix}:`, error.message);
         continue;
       }
     }
 
     if (!stockData) {
-      throw error || new Error('Failed to fetch stock data from any exchange');
+      throw new Error(`Unable to find stock data for ${ticker}`);
     }
 
-    // Cache the result
+    // Cache the successful result
     cache.stockData.set(ticker, {
       data: stockData,
       timestamp: Date.now()
@@ -566,7 +590,8 @@ app.get('/api/stock/:ticker', async (req, res) => {
     console.error('Error fetching stock data:', error.message);
     res.status(404).json({ 
       error: `Stock ${req.params.ticker} not found`,
-      ticker: req.params.ticker.toUpperCase()
+      ticker: req.params.ticker.toUpperCase(),
+      details: error.message
     });
   }
 });
