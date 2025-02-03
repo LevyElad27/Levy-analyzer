@@ -3,7 +3,6 @@ const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
 const translate = require('translate-google');
-const { OpenAI } = require('openai');
 const app = express();
 const fs = require('fs').promises;
 const path = require('path');
@@ -39,11 +38,6 @@ const CACHE_DURATION = 60000; // 1 minute cache
 // Add cache for news
 const newsCache = new Map();
 const NEWS_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
-
-// Initialize OpenAI
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
 
 // SEC EDGAR API configuration
 const SEC_BASE_URL = 'https://www.sec.gov';
@@ -877,106 +871,6 @@ app.post('/api/translate', async (req, res) => {
       error: errorMessage,
       code: errorCode,
       message: error.message 
-    });
-  }
-});
-
-// Basic company analysis endpoint
-app.post('/api/analyze/basic', async (req, res) => {
-  const { ticker } = req.body;
-  
-  if (!ticker) {
-    return res.status(400).json({ error: 'Ticker is required' });
-  }
-
-  try {
-    console.log(`Starting basic analysis for ${ticker}...`);
-    
-    // First, get current stock data
-    let stockData;
-    try {
-      const stockResponse = await axios.get(`http://localhost:3002/api/stock/${ticker}`);
-      stockData = stockResponse.data;
-    } catch (error) {
-      console.warn('Could not fetch stock data:', error.message);
-      stockData = { price: 'N/A', marketCap: 'N/A' };
-    }
-    
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4",
-      messages: [
-        {
-          role: "system",
-          content: `You are a financial analyst providing company analysis in Hebrew. Your analysis should be structured, detailed and comprehensive. When providing investment scores, use a scale of 1-10 (allowing half points) and explain your rationale. Aim to provide at least 3-4 detailed paragraphs for each section.
-
-Important: Always write your analysis in Hebrew. Do not translate section titles - use them exactly as provided in the prompt.`
-        },
-        {
-          role: "user",
-          content: `Analyze the company ${ticker} (Current Price: ${stockData.price}, Market Cap: ${stockData.marketCap}) and provide a detailed overview in Hebrew. Structure your response in the following sections:
-
-1. סקירה כללית
-- תיאור מקיף של החברה ופעילותה
-- היסטוריה ואבני דרך משמעותיות
-- מיקום בשוק ויתרונות תחרותיים
-
-2. ביצועים פיננסיים
-- ניתוח מעמיק של דוחות כספיים
-- מגמות בהכנסות, רווחיות ותזרים מזומנים
-- יחסים פיננסיים מרכזיים והשוואה לענף
-- איתנות פיננסית וניהול חוב
-
-3. התפתחויות ארגוניות
-- שינויים בהנהלה ואסטרטגיה
-- מיזוגים ורכישות
-- השקעות בטכנולוגיה וחדשנות
-- התרחבות לשווקים חדשים
-
-4. ניתוח שוק
-- גודל השוק ופוטנציאל צמיחה
-- מגמות מרכזיות בענף
-- ניתוח מתחרים מפורט
-- חסמי כניסה ויתרונות תחרותיים
-
-5. סיכונים רגולטוריים
-- רגולציה נוכחית והשפעתה
-- שינויים רגולטוריים צפויים
-- אופן התמודדות החברה עם דרישות רגולטוריות
-- השוואה לסטנדרטים בענף
-
-6. תחזיות
-- תחזיות צמיחה לטווח קצר ובינוני
-- השקעות ופיתוחים עתידיים
-- אתגרים והזדמנויות צפויים
-- מגמות שוק רלוונטיות
-
-7. כדאיות השקעה
-- ניתוח מעמיק של כדאיות ההשקעה
-- ציון השקעה לטווח קצר (1-2 שנים): [ציון מ-1 עד 10, כולל חצאי נקודות]
-- ציון השקעה לטווח בינוני (3-5 שנים): [ציון מ-1 עד 10, כולל חצאי נקודות]
-- ציון השקעה לטווח ארוך (5+ שנים): [ציון מ-1 עד 10, כולל חצאי נקודות]
-- הסבר מפורט לציונים שניתנו
-- המלצות ספציפיות למשקיעים
-
-Write your analysis in Hebrew. Each section should be comprehensive and detailed, with multiple paragraphs of analysis. Separate sections with two newlines.`
-        }
-      ],
-      temperature: 0.7,
-      max_tokens: 3000
-    });
-
-    const analysis = completion.choices[0].message.content;
-    
-    res.json({
-      ticker,
-      overview: analysis
-    });
-
-  } catch (error) {
-    console.error('Error in basic analysis:', error);
-    res.status(500).json({ 
-      error: 'Failed to analyze company',
-      details: error.message 
     });
   }
 });
