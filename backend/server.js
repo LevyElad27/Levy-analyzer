@@ -12,8 +12,46 @@ const path = require('path');
 app.use(cors());
 app.use(express.json());
 
+// Configuration for different environments
+const config = {
+  development: {
+    port: 3002,
+    googleFinanceUrl: 'https://www.google.com/finance',
+    corsOrigin: 'http://localhost:3000',
+    cacheEnabled: false,
+    cacheDuration: {
+      stock: 5000, // 5 seconds for testing
+      news: 30000  // 30 seconds for testing
+    },
+    requestTimeout: 10000, // 10 seconds
+    maxRetries: 2
+  },
+  production: {
+    port: process.env.PORT || 3002,
+    googleFinanceUrl: 'https://www.google.com/finance',
+    corsOrigin: 'https://levy-analyzer.onrender.com',
+    cacheEnabled: true,
+    cacheDuration: {
+      stock: 30000,    // 30 seconds
+      news: 300000     // 5 minutes
+    },
+    requestTimeout: 5000,
+    maxRetries: 3
+  }
+};
+
+const env = process.env.NODE_ENV || 'development';
+const currentConfig = config[env];
+
+// Update CORS configuration
+app.use(cors({
+  origin: currentConfig.corsOrigin,
+  methods: ['GET', 'POST'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
 // Google Finance API configuration
-const GOOGLE_FINANCE_URL = 'https://www.google.com/finance/quote';
+const GOOGLE_FINANCE_URL = currentConfig.googleFinanceUrl;
 
 // Yahoo Finance API configuration (for news only)
 const YAHOO_BASE_URL = 'https://query1.finance.yahoo.com/v8/finance';
@@ -456,10 +494,10 @@ function getCachedData(cache, key) {
   return null;
 }
 
-// Cache durations
+// Update cache durations
 const CACHE_DURATIONS = {
-  STOCK: 30 * 1000, // 30 seconds for stock data
-  NEWS: 5 * 60 * 1000 // 5 minutes for news
+  STOCK: currentConfig.cacheDuration.stock,
+  NEWS: currentConfig.cacheDuration.news
 };
 
 // Get stock data from Google Finance
@@ -693,22 +731,23 @@ function chunkText(filings) {
   return chunks;
 }
 
-// Add this helper function for retry logic
-async function retryWithBackoff(operation, maxRetries = 3) {
+// Helper function for retrying failed requests with configurable retries
+async function retryRequest(operation, maxRetries = currentConfig.maxRetries, delay = 1000) {
+  let lastError;
   for (let i = 0; i < maxRetries; i++) {
     try {
       return await operation();
     } catch (error) {
-      if (error.status === 429 && i < maxRetries - 1) {
-        const retryAfter = parseInt(error.headers?.['retry-after'] || '30');
-        const waitTime = retryAfter * 1000;
-        console.log(`Rate limited. Waiting ${waitTime/1000} seconds before retry ${i + 1}/${maxRetries}...`);
+      console.log(`Attempt ${i + 1}/${maxRetries} failed:`, error.message);
+      lastError = error;
+      if (i < maxRetries - 1) {
+        const waitTime = delay * (i + 1);
+        console.log(`Waiting ${waitTime}ms before retry...`);
         await new Promise(resolve => setTimeout(resolve, waitTime));
-        continue;
       }
-      throw error;
     }
   }
+  throw lastError;
 }
 
 // Modify the SEC analysis endpoint
@@ -732,7 +771,7 @@ app.post('/api/analyze/sec', async (req, res) => {
     for (const filing of filings) {
       const content = await fetchFilingContent(filing.url);
       
-      const analysis = await retryWithBackoff(async () => {
+      const analysis = await retryRequest(async () => {
         const completion = await openai.chat.completions.create({
           model: "gpt-4",
           messages: [
@@ -839,7 +878,7 @@ app.post('/api/translate', async (req, res) => {
       });
     }
 
-    const translation = await retryWithBackoff(async () => {
+    const translation = await retryRequest(async () => {
       try {
         const result = await translate(text, { to: 'iw' });
         if (!result) throw new Error('Empty translation result');
@@ -983,22 +1022,6 @@ Write your analysis in Hebrew. Each section should be comprehensive and detailed
     });
   }
 });
-
-// Helper function for retrying failed requests
-async function retryRequest(operation, maxRetries = 3, delay = 1000) {
-  let lastError;
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      return await operation();
-    } catch (error) {
-      lastError = error;
-      if (i < maxRetries - 1) {
-        await new Promise(resolve => setTimeout(resolve, delay * (i + 1)));
-      }
-    }
-  }
-  throw lastError;
-}
 
 // Search stocks endpoint
 app.get('/api/stock/search/:query', async (req, res) => {
@@ -1214,18 +1237,28 @@ process.on('unhandledRejection', (error) => {
   console.error('Unhandled Rejection:', error);
 });
 
-const PORT = process.env.PORT || 3002;
+// Update the server startup
+const PORT = currentConfig.port;
 app.listen(PORT, '0.0.0.0', (error) => {
   if (error) {
     console.error('Error starting server:', error);
     return;
   }
-  console.log(`Server is running on port ${PORT}`);
-  console.log('Environment:', process.env.NODE_ENV);
-  console.log('Memory usage:', process.memoryUsage());
+  console.log(`Server is running in ${env} mode on port ${PORT}`);
+  console.log(`CORS origin: ${currentConfig.corsOrigin}`);
+  console.log(`Cache enabled: ${currentConfig.cacheEnabled}`);
+  console.log(`Cache durations: Stock=${CACHE_DURATIONS.STOCK}ms, News=${CACHE_DURATIONS.NEWS}ms`);
 });
 
 // Add health check endpoint
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok' });
 });
+
+// Add development logging middleware
+if (env === 'development') {
+  app.use((req, res, next) => {
+    console.log(`${new Date().toISOString()} ${req.method} ${req.url}`);
+    next();
+  });
+}
